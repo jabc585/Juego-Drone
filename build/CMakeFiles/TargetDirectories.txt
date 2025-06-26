@@ -1,0 +1,3 @@
+/home/jabeich373/Descargas/Descargas/Archivo/S8/build/CMakeFiles/DroneFlightSim.dir
+/home/jabeich373/Descargas/Descargas/Archivo/S8/build/CMakeFiles/edit_cache.dir
+/home/jabeich373/Descargas/Descargas/Archivo/S8/build/CMakeFiles/rebuild_cache.dir
