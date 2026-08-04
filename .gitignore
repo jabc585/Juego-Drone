@@ -1,0 +1,26 @@
+# Build artifacts
+build/
+build-*/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+*.o
+*.out
+*.exe
+DroneFlightSim
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+._*
+
+# Dependencies
+vcpkg_installed/

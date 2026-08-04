@@ -1,37 +1,38 @@
-cmake_minimum_required(VERSION 3.10)
-project(DroneFlightSim)
+cmake_minimum_required(VERSION 3.21)
+project(DroneFlightSim VERSION 0.5.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Define the source directory (adjust if necessary)
-set(SRC_DIR ${CMAKE_SOURCE_DIR})
+option(DRONE_WERROR "Treat warnings as errors" OFF)
+option(BUILD_TESTS "Build unit tests" ON)
 
-# List of source files
-set(SOURCES
-    ${SRC_DIR}/main.cpp
-    ${SRC_DIR}/Drone.cpp
-    ${SRC_DIR}/Environment.cpp
-    ${SRC_DIR}/PhysicsEngine.cpp
-    ${SRC_DIR}/UIManager.cpp
-    ${SRC_DIR}/Game.cpp
-    ${SRC_DIR}/PlayerProgression.cpp
-)
+# Warnings compartidos por todos los targets propios (no globales: las
+# dependencias de FetchContent compilan con sus propios flags).
+add_library(drone_warnings INTERFACE)
+if(MSVC)
+    target_compile_options(drone_warnings INTERFACE /W4)
+    if(DRONE_WERROR)
+        target_compile_options(drone_warnings INTERFACE /WX)
+    endif()
+else()
+    target_compile_options(drone_warnings INTERFACE -Wall -Wextra -Wpedantic)
+    if(DRONE_WERROR)
+        target_compile_options(drone_warnings INTERFACE -Werror)
+    endif()
+endif()
 
-# Create the executable target
-add_executable(DroneFlightSim ${SOURCES})
+add_subdirectory(src/core)
+add_subdirectory(src/frontend)
+add_subdirectory(src/app)
 
-# Include the source directory for headers
-target_include_directories(DroneFlightSim PUBLIC ${SRC_DIR})
+if(BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
 
-
-# Si en el futuro deseas enlazar librerías externas (SDL2, OpenGL, Bullet, etc.),
-# puedes agregar las siguientes líneas de ejemplo:
-#
-# find_package(SDL2 REQUIRED)
-# include_directories(${SDL2_INCLUDE_DIRS})
-# target_link_libraries(DroneFlightSim ${SDL2_LIBRARIES})
-#
-# find_package(OpenGL REQUIRED)
-# target_link_libraries(DroneFlightSim ${OPENGL_LIBRARIES})
-
+set(CPACK_PACKAGE_NAME "DroneFlightSim")
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_GENERATOR "TGZ;ZIP")
+include(CPack)

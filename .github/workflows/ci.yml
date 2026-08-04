@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Misma versión que en desarrollo local para resultados idénticos.
+      - name: Install clang-format
+        run: pip install clang-format==19.1.7
+
+      - name: Check formatting
+        run: clang-format --dry-run -Werror $(git ls-files '*.h' '*.cpp')
+
+      # Guardia de arquitectura (PLAN2.md D1): el core no puede hacer I/O.
+      - name: Check no iostream in core
+        run: "! grep -rn 'cout\\|cin\\|printf' src/core/"
+
+  build-and-test:
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        build-type: [Debug, Release]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} -DDRONE_WERROR=ON
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build-type }} --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C ${{ matrix.build-type }} --output-on-failure
+
+  sanitizers:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure with ASan + UBSan
+        run: >
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
