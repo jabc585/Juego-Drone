@@ -15,14 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Misma versión que en desarrollo local para resultados idénticos.
       - name: Install clang-format
         run: pip install clang-format==19.1.7
 
       - name: Check formatting
         run: clang-format --dry-run -Werror $(git ls-files '*.h' '*.cpp')
 
-      # Guardia de arquitectura (PLAN2.md D1): el core no puede hacer I/O.
       - name: Check no iostream in core
         run: "! grep -rn 'cout\\|cin\\|printf' src/core/"
 
@@ -62,3 +60,37 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+  coverage:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gcovr
+        run: pip install gcovr
+
+      - name: Configure with coverage
+        run: >
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="--coverage"
+          -DCMAKE_EXE_LINKER_FLAGS="--coverage"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Generate coverage report
+        run: |
+          gcovr --root . --object-directory build \
+                --filter 'src/core/' \
+                --xml coverage.xml \
+                --print-summary
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml

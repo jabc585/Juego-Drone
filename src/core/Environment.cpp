@@ -3,17 +3,14 @@
 #include <algorithm>
 #include <cmath>
 
-#include "core/Config.h"
-
 namespace drone {
 
-Environment::Environment() : m_rng(0) {
+Environment::Environment(const GameConfig& cfg) : m_config(cfg), m_rng(0) {
     scheduleNextGust();
 }
 
 void Environment::loadEnvironment(const std::string& environmentName) {
     m_name = environmentName;
-    // Obstáculos del entorno inicial; en Fase 3 se cargarán de assets/levels/.
     m_obstacles = {
         {{8.0f, 5.0f, 8.0f}, {2.0f, 10.0f, 2.0f}},
         {{-10.0f, 4.0f, 6.0f}, {3.0f, 8.0f, 3.0f}},
@@ -28,14 +25,14 @@ void Environment::setSeed(uint32_t seed) {
 }
 
 void Environment::scheduleNextGust() {
-    std::uniform_real_distribution<float> interval(config::kGustMinInterval,
-                                                   config::kGustMaxInterval);
+    std::uniform_real_distribution<float> interval(m_config.gustMinInterval,
+                                                   m_config.gustMaxInterval);
     m_timeToNextGust = interval(m_rng);
 }
 
 void Environment::step(float dt) {
     m_elapsed += dt;
-    m_difficulty = std::min(config::kMaxDifficulty, 1.0f + m_elapsed * config::kDifficultyRamp);
+    m_difficulty = std::min(m_config.maxDifficulty, 1.0f + m_elapsed * m_config.difficultyRamp);
 
     m_timeToNextGust -= dt;
     if (m_timeToNextGust <= 0.0f) {
@@ -43,14 +40,19 @@ void Environment::step(float dt) {
         std::uniform_real_distribution<float> magDist(0.5f, 1.5f);
         std::uniform_real_distribution<float> vertDist(-0.1f, 0.1f);
         const float angle = angleDist(m_rng);
-        const float magnitude = magDist(m_rng) * m_difficulty * config::kWindBaseSpeed;
+        const float magnitude = magDist(m_rng) * m_difficulty * m_config.windBaseSpeed;
         m_windTarget = {std::cos(angle) * magnitude, vertDist(m_rng) * magnitude,
                         std::sin(angle) * magnitude};
         scheduleNextGust();
     }
 
-    const float blend = std::min(1.0f, config::kWindSmoothing * dt);
+    const float blend = std::min(1.0f, m_config.windSmoothing * dt);
     m_wind += (m_windTarget - m_wind) * blend;
+}
+
+void Environment::restoreProgress(float elapsed) {
+    m_elapsed = std::max(0.0f, elapsed);
+    m_difficulty = std::min(m_config.maxDifficulty, 1.0f + m_elapsed * m_config.difficultyRamp);
 }
 
 void Environment::reset() {

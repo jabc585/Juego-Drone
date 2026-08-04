@@ -5,6 +5,9 @@
 #else
 #include <poll.h>
 #include <unistd.h>
+
+#include <csignal>
+#include <cstdlib>
 #endif
 
 namespace drone {
@@ -71,21 +74,50 @@ Command TerminalInput::poll() {
 
 #else
 
+TerminalInput* TerminalInput::s_instance = nullptr;
+
+void TerminalInput::restoreTerminal() {
+    if (m_rawMode) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &m_savedTermios);
+        m_rawMode = false;
+    }
+}
+
+void TerminalInput::onSignal(int sig) {
+    if (s_instance)
+        s_instance->restoreTerminal();
+    // Re-raise con el handler por defecto para que el proceso termine.
+    std::signal(sig, SIG_DFL);
+    std::raise(sig);
+}
+
+void TerminalInput::onExit() {
+    if (s_instance)
+        s_instance->restoreTerminal();
+}
+
 TerminalInput::TerminalInput() {
     if (isatty(STDIN_FILENO) == 1 && tcgetattr(STDIN_FILENO, &m_savedTermios) == 0) {
         termios raw = m_savedTermios;
-        // Sin línea ni eco; ISIG se conserva para que Ctrl+C siga funcionando.
         raw.c_lflag &= ~static_cast<tcflag_t>(ICANON | ECHO);
         raw.c_cc[VMIN] = 0;
         raw.c_cc[VTIME] = 0;
-        if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0)
+        if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0) {
             m_rawMode = true;
+            s_instance = this;
+            std::atexit(onExit);
+            // ISIG sigue activo: Ctrl+C entrega SIGINT y sin handler la
+            // terminal quedaría en raw. SIGTERM solo no basta (PLAN3 P2-6).
+            std::signal(SIGTERM, onSignal);
+            std::signal(SIGINT, onSignal);
+            std::signal(SIGHUP, onSignal);
+        }
     }
 }
 
 TerminalInput::~TerminalInput() {
-    if (m_rawMode)
-        tcsetattr(STDIN_FILENO, TCSANOW, &m_savedTermios);
+    restoreTerminal();
+    s_instance = nullptr;
 }
 
 int TerminalInput::readByte() {
@@ -114,11 +146,12 @@ Command TerminalInput::poll() {
         return Command::Quit;
     }
 
-    if (byte == 27) {  // Esc: ¿tecla suelta o secuencia de flecha?
+    if (byte == 27) {  // Esc: ¿tecla suelta o secuencia?
         const int second = readByte();
         if (second != '[')
             return Command::Quit;
-        switch (readByte()) {
+        const int third = readByte();
+        switch (third) {
             case 'A':
                 return Command::Ascend;  // ↑
             case 'B':
@@ -127,6 +160,18 @@ Command TerminalInput::poll() {
                 return Command::StrafeRight;  // →
             case 'D':
                 return Command::StrafeLeft;  // ←
+            case '1': {                      // F5: ESC [ 1 5 ~
+                const int fourth = readByte();
+                if (fourth == '5' && readByte() == '~')
+                    return Command::Save;
+                return Command::None;
+            }
+            case '2': {  // F9: ESC [ 2 0 ~
+                const int fourth = readByte();
+                if (fourth == '0' && readByte() == '~')
+                    return Command::Load;
+                return Command::None;
+            }
             default:
                 return Command::None;
         }

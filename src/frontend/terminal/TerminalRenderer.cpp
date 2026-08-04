@@ -18,6 +18,7 @@ namespace {
 
 constexpr int kBatteryBarWidth = 10;
 constexpr std::chrono::seconds kMessageLifetime{3};
+constexpr int kLineBufferSize = 160;
 
 std::string batteryBar(float battery) {
     const int filled =
@@ -88,7 +89,7 @@ void TerminalRenderer::updateFps() {
 
 std::string TerminalRenderer::buildFrame(const WorldState& s) const {
     std::ostringstream out;
-    char line[160];
+    char line[kLineBufferSize];
 
     out << "\x1b[H";  // cursor a origen; cada línea termina con \x1b[K
     std::snprintf(line, sizeof(line), " DRONE FLIGHT SIMULATOR      %-14s FPS: %3.0f",
@@ -130,8 +131,8 @@ std::string TerminalRenderer::buildFrame(const WorldState& s) const {
                    " [R/1] Reiniciar   [X/3] Salir\x1b[K\n";
             break;
         default:
-            out << " Controles: WASD mover · Q/E subir/bajar · P pausa · X/Esc "
-                   "salir\x1b[K\n\x1b[K\n\x1b[K\n";
+            out << " Controles: WASD mover · Q/E subir/bajar · P pausa · F5/F9 "
+                   "guardar/cargar · X/Esc salir\x1b[K\n\x1b[K\n\x1b[K\n";
             break;
     }
 
@@ -182,6 +183,12 @@ void TerminalRenderer::onEvent(const Event& event) {
             break;
         case EventType::DroneUnlocked:
             std::snprintf(buffer, sizeof(buffer), "Nuevo dron desbloqueado: Modelo X avanzado");
+            break;
+        case EventType::GameSaved:
+            std::snprintf(buffer, sizeof(buffer), "Partida guardada");
+            break;
+        case EventType::GameLoaded:
+            std::snprintf(buffer, sizeof(buffer), "Partida cargada");
             break;
     }
     m_message = buffer;

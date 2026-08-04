@@ -1,29 +1,34 @@
 #pragma once
 
 #include "core/Commands.h"
+#include "core/GameConfig.h"
 #include "core/GameState.h"
 #include "core/PlayerProgression.h"
+#include "core/SaveData.h"
 #include "core/World.h"
 #include "frontend/IInputSource.h"
 #include "frontend/IRenderer.h"
 
 namespace drone {
 
-// Orquestador: máquina de estados (PLAN2.md §6.5) + bucle de timestep fijo
-// (ADR-001). Recibe el frontend por inyección; jamás conoce implementaciones
-// concretas ni hace I/O.
 class GameController {
 public:
-    GameController(IInputSource& input, IRenderer& renderer);
+    GameController(IInputSource& input, IRenderer& renderer, const GameConfig& cfg);
 
-    // Bloquea hasta que el estado llegue a ShuttingDown.
     void run();
-
-    // Una iteración del bucle con un tiempo de frame dado; expuesto para
-    // poder testear el controlador sin reloj real.
     void tick(float frameSeconds);
-
     GameState state() const { return m_state; }
+    EventBus& getEventBus() { return m_world.events(); }
+    WorldState getSnapshot() const { return makeState(); }
+
+    // Banderas de guardado/carga que el app layer consulta tras tick().
+    bool saveRequested() const { return m_saveRequested; }
+    void clearSaveRequest() { m_saveRequested = false; }
+    bool loadRequested() const { return m_loadRequested; }
+    void clearLoadRequest() { m_loadRequested = false; }
+
+    // Aplica datos de una partida guardada.
+    void applyLoad(const struct SaveData& data);
 
 private:
     void handleCommand(Command cmd);
@@ -31,6 +36,7 @@ private:
     void restart();
     WorldState makeState() const;
 
+    const GameConfig& m_config;
     IInputSource& m_input;
     IRenderer& m_renderer;
     World m_world;
@@ -41,10 +47,11 @@ private:
     float m_xpFraction = 0.0f;
     bool m_crashed = false;
 
-    // Empuje por pulsación: cada eje mantiene su dirección durante
-    // kThrustPulseSeconds tras la última tecla.
     float m_pulseDir[3] = {0.0f, 0.0f, 0.0f};
     float m_pulseTime[3] = {0.0f, 0.0f, 0.0f};
+
+    bool m_saveRequested = false;
+    bool m_loadRequested = false;
 };
 
 }  // namespace drone

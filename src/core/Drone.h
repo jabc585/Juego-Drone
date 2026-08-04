@@ -1,15 +1,14 @@
 #pragma once
 
-#include "core/Config.h"
+#include "core/GameConfig.h"
 #include "core/math/Vec3.h"
 
 namespace drone {
 
-// Estado del dron. La integración de fuerzas vive en PhysicsEngine (PLAN2.md R4):
-// esta clase no contiene lógica de movimiento, solo estado y sus invariantes.
 class Drone {
 public:
-    // Entrada de empuje normalizada: cada eje se recorta a [-1, 1].
+    explicit Drone(const GameConfig& cfg) : m_config(cfg), m_battery(cfg.batteryMax) {}
+
     void setThrustInput(const Vec3& input);
     Vec3 thrustInput() const { return m_thrustInput; }
 
@@ -21,20 +20,16 @@ public:
 
     void setPosition(const Vec3& p) { m_position = p; }
     void setVelocity(const Vec3& v) { m_velocity = v; }
-
-    // Resta batería; nunca baja de 0 ni sube de kBatteryMax.
     void drainBattery(float amount);
-
-    // Apoya el dron en el suelo anulando la velocidad vertical.
     void clampToGround();
-
     void reset();
 
 private:
+    const GameConfig& m_config;
     Vec3 m_position;
     Vec3 m_velocity;
     Vec3 m_thrustInput;
-    float m_battery = config::kBatteryMax;
+    float m_battery;
 };
 
 }  // namespace drone

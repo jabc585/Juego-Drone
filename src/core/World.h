@@ -3,18 +3,20 @@
 #include "core/Drone.h"
 #include "core/Environment.h"
 #include "core/EventBus.h"
+#include "core/GameConfig.h"
 #include "core/PhysicsEngine.h"
 #include "core/WorldState.h"
 
 namespace drone {
 
-// Agrega dron + entorno + física y posee el bus de eventos de la simulación.
 class World {
 public:
-    World();
+    explicit World(const GameConfig& cfg);
 
     void step(float dt);
     void reset();
+    // Restaura el reloj de simulación (y la dificultad derivada) al cargar.
+    void restoreSimTime(float simTime);
 
     void setThrustInput(const Vec3& input) { m_drone.setThrustInput(input); }
 
@@ -25,8 +27,6 @@ public:
     EventBus& events() { return m_bus; }
     float simTime() const { return m_simTime; }
 
-    // Rellena la parte de simulación del snapshot; GameController añade
-    // progresión y estado de la máquina de estados.
     WorldState snapshot() const;
 
 private:

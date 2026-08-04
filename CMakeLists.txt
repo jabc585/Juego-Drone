@@ -8,8 +8,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(DRONE_WERROR "Treat warnings as errors" OFF)
 option(BUILD_TESTS "Build unit tests" ON)
 
-# Warnings compartidos por todos los targets propios (no globales: las
-# dependencias de FetchContent compilan con sus propios flags).
 add_library(drone_warnings INTERFACE)
 if(MSVC)
     target_compile_options(drone_warnings INTERFACE /W4)
@@ -22,6 +20,26 @@ else()
         target_compile_options(drone_warnings INTERFACE -Werror)
     endif()
 endif()
+
+# toml++ para carga de configuracion en runtime (PLAN3.md P0-2)
+# spdlog para logging estructurado (PLAN3.md P0-1)
+include(FetchContent)
+# SYSTEM: los warnings de los headers de dependencias no rompen nuestro -Werror.
+FetchContent_Declare(
+    tomlplusplus
+    GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
+    GIT_TAG        v3.4.0
+    SYSTEM
+)
+# v1.14.1: v1.13 no compila con -Werror en libc++ moderno (char_traits
+# deprecado en el fmt embebido).
+FetchContent_Declare(
+    spdlog
+    GIT_REPOSITORY https://github.com/gabime/spdlog.git
+    GIT_TAG        v1.14.1
+    SYSTEM
+)
+FetchContent_MakeAvailable(tomlplusplus spdlog)
 
 add_subdirectory(src/core)
 add_subdirectory(src/frontend)

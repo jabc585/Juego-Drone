@@ -2,12 +2,17 @@
 
 namespace drone {
 
-World::World() : m_physics(m_bus) {}
+World::World(const GameConfig& cfg) : m_drone(cfg), m_environment(cfg), m_physics(cfg, m_bus) {}
 
 void World::step(float dt) {
     m_environment.step(dt);
     m_physics.step(m_drone, m_environment, dt);
     m_simTime += dt;
+}
+
+void World::restoreSimTime(float simTime) {
+    m_simTime = simTime < 0.0f ? 0.0f : simTime;
+    m_environment.restoreProgress(m_simTime);
 }
 
 void World::reset() {

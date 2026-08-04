@@ -5,27 +5,27 @@
 #include <string>
 #include <vector>
 
+#include "core/GameConfig.h"
 #include "core/math/Vec3.h"
 
 namespace drone {
 
-// Caja de colisión alineada a ejes: centro + extensión completa.
 struct Obstacle {
     Vec3 center;
     Vec3 size;
 };
 
-// Entorno con estado real (PLAN2.md R6): viento por rachas suavizadas,
-// dificultad que crece con el tiempo y obstáculos AABB.
 class Environment {
 public:
-    Environment();
+    explicit Environment(const GameConfig& cfg);
 
     void loadEnvironment(const std::string& environmentName);
-    // Determinismo para tests: misma semilla ⇒ misma secuencia de rachas.
     void setSeed(uint32_t seed);
     void step(float dt);
     void reset();
+    // Restaura el tiempo transcurrido (y con él la dificultad) al cargar
+    // una partida guardada.
+    void restoreProgress(float elapsed);
 
     Vec3 wind() const { return m_wind; }
     float difficulty() const { return m_difficulty; }
@@ -35,6 +35,7 @@ public:
 private:
     void scheduleNextGust();
 
+    const GameConfig& m_config;
     std::string m_name;
     std::vector<Obstacle> m_obstacles;
     std::mt19937 m_rng;

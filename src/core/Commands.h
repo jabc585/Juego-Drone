@@ -17,6 +17,8 @@ enum class Command {
     Option1,
     Option2,
     Option3,
+    Save,
+    Load,
 };
 
 }  // namespace drone

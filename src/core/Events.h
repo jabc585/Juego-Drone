@@ -8,6 +8,8 @@ enum class EventType {
     Collision,      // value = velocidad de impacto en m/s
     LevelUp,        // value = nivel alcanzado
     DroneUnlocked,  // value = nivel de desbloqueo
+    GameSaved,      // value sin uso
+    GameLoaded,     // value sin uso
 };
 
 struct Event {

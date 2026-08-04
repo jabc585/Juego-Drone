@@ -1,0 +1,38 @@
+# Juego-Drone — Configuracion de juego
+# Todos los campos son opcionales: el valor ausente usa el default de fabrica.
+# Rangos: los valores fuera de rango se ignoran y generan un aviso en consola.
+
+[physics]
+gravity          = 9.81
+drone_mass       = 1.2
+max_thrust       = 25.0
+drag_coefficient = 0.35
+drone_radius     = 0.4
+crash_speed      = 8.0
+
+[battery]
+max          = 100.0
+per_newton   = 0.02
+low_threshold = 20.0
+
+[loop]
+fixed_timestep       = 0.0166667
+max_frame_time       = 0.25
+thrust_pulse_seconds = 0.35
+
+[progression]
+xp_per_level_base = 100
+unlock_level      = 3
+xp_per_second     = 5.0
+
+[world]
+half_extent = 100.0
+max_altitude = 50.0
+
+[environment]
+wind_base_speed   = 1.5
+wind_smoothing    = 2.0
+gust_min_interval = 2.0
+gust_max_interval = 6.0
+difficulty_ramp   = 0.02
+max_difficulty    = 10.0

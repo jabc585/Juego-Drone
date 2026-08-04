@@ -7,9 +7,29 @@ y este proyecto adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 
 ## [Unreleased]
 
+### Added
+- Guardado/carga de partida (F5/F9 y autocarga al arrancar) en el directorio de datos del usuario, formato TOML versionado con validación estricta — se rechazan saves corruptos, con NaN/inf o con estados ilegales (PLAN3 P0-4).
+- Configuración en runtime desde `assets/config/game.toml` (toml++): `GameConfig` inyectada, valores fuera de rango truncados con aviso (PLAN3 P0-2).
+- Logging estructurado con spdlog en la capa app, suscrito al EventBus; el core sigue sin I/O (PLAN3 P0-1).
+- Eventos `GameSaved`/`GameLoaded` con mensaje en el HUD y en el log.
+- Tests de GameController, Environment y casos límite; suite total 71 (PLAN3 P0-3, P2-2, P2-4).
+- Restauración de la terminal ante SIGINT/SIGTERM/SIGHUP y salida anómala (PLAN3 P2-6).
+- ADRs 004–007 y job de cobertura en CI.
+
+### Fixed
+- El bucle de `main` llamaba `tick(0.0f)` sin reloj ni sleep: el mundo no avanzaba nunca y la CPU iba al 100 %; ahora mide el tiempo real de frame como `GameController::run()`.
+- `saveGame` desreferenciaba un puntero nulo al construir el TOML (crash al guardar) y nunca creaba el directorio de guardado (el primer guardado fallaba siempre).
+- Un `game.toml` o `save.toml` malformado abortaba el proceso en builds Debug por una aserción interna de toml++; ahora toda entrada inválida degrada a aviso + defaults (`app/TomlSafe.h`).
+- `applyLoad` perdía el nivel del jugador (solo re-aplicaba la XP residual), disparaba una ráfaga de eventos LevelUp al cargar y descartaba dificultad/tiempo de simulación; un save con estado ilegal podía cerrar el juego al cargarse.
+- El mensaje de "partida guardada" reutilizaba el evento LevelUp y mostraba "¡Nivel 0 alcanzado!".
+- Solo se registraba SIGTERM: Ctrl+C (SIGINT) dejaba la terminal en modo raw sin eco.
+- `DRONE_VERSION` se perdió del build: el binario y el log reportaban 0.0.0-dev.
+- spdlog fijado a v1.14.1 y dependencias marcadas SYSTEM (v1.13 no compila con `-Werror` en libc++ moderno).
+- Tests de GameOver reescritos: asumían que `tick(10.0f)` simula 10 s (el clamp de `maxFrameTime` lo limita a 0.25 s) y que un dron posado en el suelo puede estrellarse.
+
 ## [0.5.0] — 2026-08-04
 
-Cierre de las Fases 1 y 2 del plan (PLAN2.md §17), salvo la tarea 2.6 (config TOML + spdlog), que queda pendiente.
+Cierre de las Fases 1 y 2 del plan original (PLAN3.md §17 documenta la trazabilidad), salvo la tarea 2.6 (config TOML + spdlog), que queda pendiente.
 
 ### Added
 - Física real en `PhysicsEngine` (R4): empuje, gravedad, arrastre/viento con velocidad terminal, suelo, límites del mundo, obstáculos AABB y consumo de batería proporcional al empuje.

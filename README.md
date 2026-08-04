@@ -17,7 +17,7 @@ cmake --build build --parallel
 ./build/src/app/DroneFlightSim
 ```
 
-> El frontend interactivo de terminal está soportado en macOS/Linux; en Windows el soporte interactivo llega con el frontend gráfico (Fase 3, ver [PLAN2.md](PLAN2.md)).
+> El frontend interactivo de terminal está soportado en macOS/Linux; en Windows el soporte interactivo llega con el frontend gráfico (ver [PLAN3.md](PLAN3.md)).
 
 ## Controles
 
@@ -53,8 +53,7 @@ Juego-Drone/
 ├── tests/           # Catch2: unit/ + integration/ + humo E2E
 ├── docs/            # arquitectura, estilo, ADRs, contribución
 ├── assets/          # configuración y niveles (Fase 2+)
-├── PLAN.md          # análisis de referencia (v1)
-└── PLAN2.md         # hoja de ruta vigente
+└── PLAN3.md         # hoja de ruta vigente
 ```
 
 La regla de arquitectura central: `src/core/` no contiene ninguna operación de I/O (la CI lo verifica con un guard automático) y no conoce las implementaciones concretas del frontend.

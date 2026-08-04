@@ -15,7 +15,7 @@ void Drone::setThrustInput(const Vec3& input) {
 }
 
 void Drone::drainBattery(float amount) {
-    m_battery = std::max(0.0f, std::min(config::kBatteryMax, m_battery - amount));
+    m_battery = std::max(0.0f, std::min(m_config.batteryMax, m_battery - amount));
 }
 
 void Drone::clampToGround() {
@@ -29,7 +29,7 @@ void Drone::reset() {
     m_position = {};
     m_velocity = {};
     m_thrustInput = {};
-    m_battery = config::kBatteryMax;
+    m_battery = m_config.batteryMax;
 }
 
 }  // namespace drone

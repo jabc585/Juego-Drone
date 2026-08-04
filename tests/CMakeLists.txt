@@ -12,6 +12,9 @@ add_executable(test_core
     unit/TestEventBus.cpp
     unit/TestPhysics.cpp
     unit/TestProgression.cpp
+    unit/TestGameController.cpp
+    unit/TestEnvironment.cpp
+    unit/TestEdgeCases.cpp
     integration/TestWorldStep.cpp
 )
 

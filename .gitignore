@@ -24,3 +24,6 @@ DroneFlightSim
 
 # Dependencies
 vcpkg_installed/
+PLAN3.md# Runtime
+drone_game.log
+*.log

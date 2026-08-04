@@ -4,28 +4,27 @@
 #include <chrono>
 #include <thread>
 
-#include "core/Config.h"
-
 namespace drone {
 
 namespace {
 constexpr int kAxisX = 0;
 constexpr int kAxisY = 1;
 constexpr int kAxisZ = 2;
-// Cota de comandos procesados por frame para que una entrada a ráfagas
-// (p. ej. un pipe) no monopolice el bucle.
 constexpr int kMaxCommandsPerFrame = 32;
 }  // namespace
 
-GameController::GameController(IInputSource& input, IRenderer& renderer)
-    : m_input(input), m_renderer(renderer), m_progression(&m_world.events()) {
+GameController::GameController(IInputSource& input, IRenderer& renderer, const GameConfig& cfg)
+    : m_config(cfg),
+      m_input(input),
+      m_renderer(renderer),
+      m_world(cfg),
+      m_progression(cfg, m_world.events()) {
     m_world.environment().loadEnvironment("Ciudad Futurista");
 
     m_world.events().subscribe(EventType::Collision, [this](const Event& e) {
-        if (e.value > config::kCrashSpeed)
+        if (e.value > m_config.crashSpeed)
             m_crashed = true;
     });
-    // El frontend recibe todos los eventos para mostrarlos como avisos.
     m_world.events().subscribeAll([this](const Event& e) { m_renderer.onEvent(e); });
 
     m_state = GameState::Playing;
@@ -46,8 +45,7 @@ void GameController::run() {
 }
 
 void GameController::tick(float frameSeconds) {
-    // Clamp anti "espiral de la muerte" (PLAN2.md §10.3).
-    m_accumulator += std::min(frameSeconds, config::kMaxFrameTime);
+    m_accumulator += std::min(frameSeconds, m_config.maxFrameTime);
 
     for (int i = 0; i < kMaxCommandsPerFrame; ++i) {
         const Command cmd = m_input.poll();
@@ -58,19 +56,19 @@ void GameController::tick(float frameSeconds) {
             return;
     }
 
-    while (m_accumulator >= config::kFixedTimestep) {
+    while (m_accumulator >= m_config.fixedTimestep) {
         if (m_state == GameState::Playing)
-            fixedUpdate(config::kFixedTimestep);
-        m_accumulator -= config::kFixedTimestep;
+            fixedUpdate(m_config.fixedTimestep);
+        m_accumulator -= m_config.fixedTimestep;
     }
 
-    m_renderer.draw(makeState(), m_accumulator / config::kFixedTimestep);
+    m_renderer.draw(makeState(), m_accumulator / m_config.fixedTimestep);
 }
 
 void GameController::handleCommand(Command cmd) {
     const auto pulse = [this](int axis, float dir) {
         m_pulseDir[axis] = dir;
-        m_pulseTime[axis] = config::kThrustPulseSeconds;
+        m_pulseTime[axis] = m_config.thrustPulseSeconds;
     };
 
     switch (m_state) {
@@ -99,6 +97,12 @@ void GameController::handleCommand(Command cmd) {
                     break;
                 case Command::Quit:
                     m_state = GameState::ShuttingDown;
+                    break;
+                case Command::Save:
+                    m_saveRequested = true;
+                    break;
+                case Command::Load:
+                    m_loadRequested = true;
                     break;
                 default:
                     break;
@@ -159,8 +163,7 @@ void GameController::fixedUpdate(float dt) {
 
     m_world.step(dt);
 
-    // XP por tiempo de vuelo, acumulando fracciones entre steps.
-    m_xpFraction += config::kXPPerSecond * dt;
+    m_xpFraction += m_config.xpPerSecond * dt;
     if (m_xpFraction >= 1.0f) {
         const int whole = static_cast<int>(m_xpFraction);
         m_progression.addExperience(whole);
@@ -194,6 +197,30 @@ WorldState GameController::makeState() const {
     s.experienceToNext = m_progression.getExperienceToNext();
     s.state = m_state;
     return s;
+}
+
+void GameController::applyLoad(const SaveData& data) {
+    m_world.reset();
+    m_progression.reset();
+    m_xpFraction = 0.0f;
+    m_crashed = false;
+    for (int axis = 0; axis < 3; ++axis) {
+        m_pulseDir[axis] = 0.0f;
+        m_pulseTime[axis] = 0.0f;
+    }
+
+    auto& drone = m_world.drone();
+    drone.setPosition({data.dronePosX, data.dronePosY, data.dronePosZ});
+    drone.setVelocity({data.droneVelX, data.droneVelY, data.droneVelZ});
+    drone.drainBattery(drone.battery() - data.battery);
+
+    // Sin eventos: cargar nivel 5 no debe disparar cuatro LevelUp.
+    m_progression.restore(data.level, data.experience);
+    m_world.restoreSimTime(data.simTime);
+
+    // Un save solo puede reanudarse jugando o en pausa; cualquier otro
+    // estado guardado (corrupto o editado) no debe cerrar el juego.
+    m_state = (data.state == GameState::Paused) ? GameState::Paused : GameState::Playing;
 }
 
 }  // namespace drone
