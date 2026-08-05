@@ -1508,59 +1508,58 @@ flowchart LR
     style g3 fill:#1a3a5c,color:#fff
 ```
 
-| # | Sugerencia | Dónde |
-|---|---|---|
-| 1 | `IPhysicsDebugger` en vez de getter | §4.4, §6.16 |
-| 2 | `PhysicsSettings` completo a TOML | §6.1 (con defaults reales verificados) |
-| 3 | Capas + matriz de colisión | §4.5 (+ validación de simetría y tope de 16) |
-| 4 | Subpasos configurables por cuerpo | §6.17 — **corregido:** el barrido es por cuerpo, la subdivisión es global (C1) |
-| 5 | Separar contactos y triggers | §6.7 |
-| 6 | Profiler desde la Fase 1 | §6.18, Fase 1 |
-| 7 | ECS con archetypes | §4.6, §6.13 (con el coste de cambios estructurales dicho) |
-| 8 | `PhysicsQuerySystem` separado | §4.4, §6.9 |
-| 9 | `JointSystem` separado | §4.4, §6.10 |
-| 10 | Islas de simulación | §6.20 — **corregido:** rp3d no las expone (C3), se calculan |
-| 11 | `TransformHierarchy` | §6.13 (+ regla hijo-con-cuerpo → `FixedJoint`) |
-| 12 | Pipeline con fases y ganchos | §5.1 |
-| 13 | `ShapeKey` con hash estable | §6.5 (cuantización a milímetros) |
-| 14 | `batchCreateBodies` | §6.5, §12 |
-| 15 | `autoUpdateMass` como flag | §6.3, §6.5 |
-| 16 | `userData` opaco | §6.5 (verificado: `Body::setUserData`) |
-| 17 | `HandlePool` con tests propios | §4.3, §6.2, §10.4 |
-| 18 | `ContactFilter` dinámico | §6.8 — **corregido:** sin hook pre-narrowphase (C5), se hace por máscara |
-| 19 | Gravedad por cuerpo o zona | §6.13 (`GravityZoneComponent`) |
-| 20 | `IAssetProvider` para mallas | §6.14 |
-| 21 | `PhysicsRewindSystem` | §6.19, §10.3 |
-| 22 | Batch raycasting | §6.9, §6.11 |
-| 23 | `getContacts(BodyId)` | §6.7 — **corregido:** sin acceso a manifolds (C4), mapa propio |
-| 24 | Fuerzas internas de joints | §6.10 (verificado: sí existen) |
-| 25 | Regresión visual de vuelo | §10.1 |
-| 26 | Estrés: 500 cajas apiladas | §10.2 |
-| 27 | Determinismo por rebobinado | §10.3 |
-| 28 | Tests de `HandlePool` | §10.4 |
-| 29 | Integración por tipo de joint | §10.5 |
-| 30 | Benchmarks | §10.6, Fase 0 |
-| 31 | Bordes: masas, escalas, NaN | §10.7 |
-| 32 | Fuzzer | §10.8 |
-| 33 | Fase 2.5 de integración vertical | §8, Fase 2.5 |
-| 34 | Demo jugable por fase | §8, reglas transversales |
-| 35 | Benchmark de rp3d aislado en Fase 0 | §8, Fase 0 |
-| 36 | Checklist de limpieza | §8, Fase 1 (5 puntos) |
-| 37 | Migración de savegames con tests | §7, §8 Fase 1 |
-| 38 | Fase −1 de formación | §8, Fase −1 (condicional, con disparador) |
-| 39 | Estimaciones con rango | §8 (todas las fases) y §1.1 |
-| 40 | Contingencia por riesgo | §9 (disparador + acción) |
-| 41 | `docs/physics/` con guías | §11.1 |
-| 42 | `MIGRATION.md` de diferencias | §11.2 |
-| 43 | CHANGELOG de física | §11.3 |
-| 44 | Diagramas de vehículo y CCD | §6.12, §6.17 |
-| 45 | El "por qué" en cabeceras | §11.5 |
-| 46 | `PhysicsLODSystem` | §6.21 |
-| 47 | Delegar subpasos en rp3d | §3.3 **C1 — no es posible:** `update()` no subdivide |
-| 48 | `testAABBOverlap` | §3.3 **C2 — no existe:** overlap con cuerpo-sonda (§6.9) |
-| 49 | Lecciones de otros proyectos | §15.1 |
-| 50 | Criterio de completitud del plan | §15.2 |
-
+| # | Qué se pidió | Qué se hizo — artefacto verificable | § |
+|---|---|---|---|
+| 1 | `IPhysicsDebugger` en vez de getter | Interfaz con `beginFrame`/`line`/`triangle`/`endFrame` y `addDebugger()` para **varios** visualizadores a la vez; el `debugGeometry()` de v1.0 se elimina | §4.4, §6.16 |
+| 2 | `PhysicsSettings` completo a TOML | Bloques `[physics.world]`, `[physics.sleeping]` y `[physics.step]` con los **12 campos de `WorldSettings`** y sus defaults reales leídos del header (`time_before_sleep`, `sleep_linear_velocity`, `sleep_angular_velocity`…) | §6.1 |
+| 3 | Capas + matriz de colisión | `[physics.layers]` con nombres + `collision_matrix`; `LayerRegistry` compila a bits, **valida simetría** y rechaza >16 capas (tope real de `unsigned short`) | §4.5, §6.8 |
+| 4 | Subpasos por cuerpo | `BodyDesc::maxSubSteps` + `[physics.step] max_sub_steps`. **Corregido (C1):** el barrido por raycast sí es por cuerpo; la subdivisión de `update()` es global por fuerza | §6.17 |
+| 5 | Separar contactos y triggers | `ContactBridge` y `TriggerBridge` como clases distintas: el trigger no estima impulso ni consulta masas | §6.7 |
+| 6 | Profiler desde la Fase 1 | `struct PhysicsStats` con cuerpos activos, pares de contacto, eventos, raycasts, subpasos y ms por fase; **tarea explícita de la Fase 1** y regla de "antes/después" para optimizar | §6.18, §8 F1, §12 |
+| 7 | ECS con archetypes | ADR-013 con el coste de los cambios estructurales dicho; diagrama de qué archetypes recorre `syncTransforms` y cuáles no | §4.6, §6.13 |
+| 8 | `PhysicsQuerySystem` separado | Clase propia con `closest`/`any`/`all`/`batch` + `overlapBox`/`overlapSphere`; el manager ya no tiene consultas | §4.4, §6.9 |
+| 9 | `JointSystem` separado | Clase propia con los 4 constructores, `setHingeMotor` en caliente y las fuerzas de reacción | §4.4, §6.10 |
+| 10 | Islas de simulación | `IslandTracker` por union-find. **Corregido (C3):** rp3d **no expone** islas (`createIslands()` es privado), se calculan con los pares que ya recibimos | §6.20 |
+| 11 | Jerarquía padre-hijo | `HierarchyComponent` + `BodyDesc::parent`; regla explícita: hijo **con** cuerpo propio va con `FixedJoint`, no con jerarquía | §6.13 |
+| 12 | Pipeline con fases y ganchos | `enum class PhysicsPhase` (PreStep/PostStep/PostSync) + `addHook`; diagrama de las 4 fases y ejemplo del power-up de gravedad | §5.1 |
+| 13 | `ShapeKey` con hash estable | Clave cuantizada a **milímetros** (`quantize()`), y para mallas manda el `AssetId`, sin cuantizar nada | §6.5 |
+| 14 | Creación en lote | `createBodies(std::span<const BodyDesc>, std::span<BodyId>)`, con los colliders añadidos antes del primer `update()` para que el árbol AABB se reequilibre una sola vez | §6.5, §12 |
+| 15 | `autoUpdateMass` como flag | Campo en `ShapeDesc` (por defecto `true`) + explicación del orden que produce el "dron de 40 kg" | §6.3, §6.5 |
+| 16 | `userData` opaco | `BodyDesc::userData` (uint64) sobre `Body::setUserData` — **verificado que existe**; elimina el mapa `BodyId→Entidad` del camino caliente | §6.3, §6.5 |
+| 17 | `HandlePool` reutilizable | `src/physics/HandlePool.h` como plantilla con freelist y generaciones, **tests propios sin rp3d** y diagrama del ciclo de vida | §4.3, §6.2, §10.4 |
+| 18 | `ContactFilter` dinámico | `setPassThrough(body, layer, bool)`. **Corregido (C5):** no hay hook pre-narrowphase; se hace cambiando la máscara en caliente, que además es más barato que un filtro por par | §6.8 |
+| 19 | Gravedad por zona | `GravityZoneComponent`: desactiva la gravedad global del cuerpo y aplica su vector en el hook `PreStep` | §6.13 |
+| 20 | `IAssetProvider` | Interfaz con `convexMesh`/`concaveMesh`/`heightField`; `drone_physics` no incluye cargadores y las formas se testean con **geometría sintética** | §6.14 |
+| 21 | `PhysicsRewindSystem` | `PhysicsFrame` con transform + velocidades (rp3d no serializa), `record`/`restore`/`replay`; solo en debug | §6.19, §10.3 |
+| 22 | Raycast en lote | `batch(std::span<const Ray>, filtro, span<RaycastHit>)` con buffer preasignado; lo consume el character controller | §6.9, §6.11 |
+| 23 | `getContacts(BodyId)` | `contacts(BodyId)` sobre un mapa propio `m_activeContacts`. **Corregido (C4):** los `ContactManifold` **no** son accesibles; el mapa se alimenta de Start/Stay/Exit y `ContactStay` llega cada frame | §6.7 |
+| 24 | Fuerzas internas de joints | `reactionForce`, `reactionTorque` y `motorTorque` — **verificado que rp3d los expone** — más `breakForce` para romper joints y dibujo de la tensión en el debug | §6.10, §6.16 |
+| 25 | Regresión de vuelo | 4 maniobras de referencia con tolerancia: despegue 2 s, hover 10 s, caída desde 20 m, choque lateral. Sustituyen a los tests de fórmula | §10.1 |
+| 26 | Estrés | Torre de 500 cajas estable a 10 s + 1.000 cuerpos creados y destruidos sin fuga (ASan) | §10.2 |
+| 27 | Determinismo por rebobinado | Simular 100 pasos, guardar, resetear, re-simular y exigir **igualdad bit a bit**; válido en CI multiplataforma porque compara el binario consigo mismo | §10.3 |
+| 28 | Tests de `HandlePool` | Los 4 casos pedidos (asignar, invalidar, reusar con generación nueva, handle caduco detectable) + `LayerRegistry` y `ShapeKey` | §10.4 |
+| 29 | Tests de joints | Péndulo (periodo), slider bajo fuerza constante, fixed (distancia invariante), ball-socket (cadena); detectan cambios de semántica de rp3d | §10.5 |
+| 30 | Benchmarks | `BENCHMARK` de Catch2 sobre `fixedStep` con 100/500/1.000 cuerpos, `closest` y `syncTransforms`; línea base en `docs/physics/baseline.md` | §10.6, §8 F0 |
+| 31 | Condiciones de borde | Masa 0/negativa, escala 0, NaN e infinito saneados, cuerpo sin colliders, handle destruido, timestep 0 y negativo | §10.7 |
+| 32 | Fuzzer | 1.000 frames con cuerpos, formas, fuerzas y destrucciones aleatorias con semilla fija: ni crash ni NaN | §10.8 |
+| 33 | Fase 2.5 | Fase propia de 1 semana con 4 criterios: materiales por superficie, altímetro por raycast, eventos con sonido y aviso, capas aplicadas al juego real | §8 F2.5 |
+| 34 | Demo jugable por fase | Elevado a **regla transversal** de todas las fases, no una tarea suelta | §8 |
+| 35 | Benchmark de rp3d aislado | Tarea de Fase 0: 1.000 cajas con rp3d puro, FPS y ms/paso a `baseline.md`, para saber después si la culpa es de rp3d o nuestra | §8 F0 |
+| 36 | Checklist de limpieza | 5 pasos verificables, terminando en `grep -rn "PhysicsEngine" src/ tests/` con **cero** líneas | §8 F1 |
+| 37 | Migración de savegames | Tarea de Fase 1 con test que carga un save **v1 real** y produce partida jugable en v2 | §7, §8 F1 |
+| 38 | Fase −1 de formación | Fase condicional (0–2 semanas) con **disparador medible**: si no sabe explicar por qué tiembla una pila de 10 cajas, se activa | §8 F−1 |
+| 39 | Estimaciones con rango | Todas las fases con rango optimista–pesimista y total **23–36 semanas** (antes: 22 fijas) | §1.1, §8 |
+| 40 | Contingencia por riesgo | Los 8 riesgos con **disparador medible** y acción concreta, incluido qué hacer si la Fase 1 llega a la semana 7 | §9 |
+| 41 | Guías por caso de uso | `docs/physics/` con 5 guías nombradas (cuerpo estático, proyectil, capas, depurar atravesamiento, perfilar frame) | §11.1 |
+| 42 | `MIGRATION.md` | Tabla "antes hacía X / ahora hace Y / ajusta Z" con 4 diferencias reales entre el integrador propio y rp3d | §11.2 |
+| 43 | CHANGELOG de física | `docs/physics/CHANGELOG-fisica.md` desde la Fase 1, y actualizarlo es tarea de cierre de cada fase | §11.3, §8 |
+| 44 | Diagramas de vehículo y CCD | Diagrama de rueda-suspensión-suelo y diagrama del flujo de barrido y subpasos, además del de character controller que ya existía | §6.12, §6.17 |
+| 45 | El "por qué" en cabeceras | Regla explícita: `PhysicsManager.h` abre explicando por qué existe el módulo, por qué usa pimpl y por qué no expone rp3d | §11.5 |
+| 46 | `PhysicsLODSystem` | 4 bandas (near / near-far / far / cull) configurables, aplicadas **por isla** y no por cuerpo suelto | §6.21 |
+| 47 | Delegar subpasos en rp3d | **No incorporada — imposible.** `PhysicsWorld::update()` es lineal, sin `maxSubSteps` ni acumulador interno; eso es `stepSimulation` de Bullet. El acumulador externo pasa de opcional a obligatorio | §3.3 C1 |
+| 48 | `testAABBOverlap` | **No incorporada — no existe.** Solo hay `testOverlap` contra un cuerpo. Se sustituye por un **cuerpo-sonda reutilizable** que da el mismo resultado | §3.3 C2, §6.9 |
+| 49 | Lecciones de otros proyectos | 6 patrones de fracaso recurrentes, cada uno con la mitigación concreta de este plan | §15.1 |
+| 50 | Criterio de completitud | 4 condiciones para marcar el plan **Cerrado** y reparto de su contenido vivo a `docs/` | §15.2 |
 ---
 
 ## 15. Cierre: lecciones ajenas y criterio de completitud
