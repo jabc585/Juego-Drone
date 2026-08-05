@@ -71,7 +71,42 @@ Las 50 sugerencias de revisión se incorporan íntegras (trazabilidad una a una 
 - **Fases nuevas:** una Fase −1 condicional de formación, una Fase 2.5 de integración vertical, y demo jugable al final de **cada** fase.
 - **Estimaciones con rango** optimista/pesimista y **contingencia por riesgo** con disparador explícito (§9).
 
-### 1.4 Las 5 sugerencias que el código de rp3d desmiente
+### 1.4 Mapa general: cómo se conecta todo
+
+Este documento tiene una única espina dorsal. Todo lo demás cuelga de aquí, y cada caja enlaza con su sección.
+
+```mermaid
+flowchart TB
+    ENC["ENCARGO<br/>26 apartados"] --> VER["§3 · Verificación contra el código de rp3d 0.10.2"]
+    VER --> OK["21 apartados:<br/>integración directa"]
+    VER --> GAP["5 huecos H1-H5:<br/>hay que construirlos"]
+    VER --> COR["5 correcciones C1-C5:<br/>sugerencias que el código desmiente"]
+
+    OK --> DEC["§4 · Decisiones ADR-008 a ADR-013"]
+    GAP --> DEC
+    COR --> DEC
+
+    DEC --> ARQ["§5 · Arquitectura:<br/>drone_physics + PhysicsPipeline"]
+    ARQ --> SIS["§6 · 21 subsistemas"]
+    SIS --> IMP["§7 · Impacto sobre lo que ya funciona"]
+    IMP --> FAS["§8 · Fases -1 a 6<br/>23-36 semanas"]
+
+    FAS --> RIE["§9 · Riesgos con disparador y contingencia"]
+    FAS --> PRU["§10 · Pruebas"]
+    FAS --> DOC["§11 · Documentación"]
+    FAS --> REN["§12 · Rendimiento"]
+
+    RIE & PRU & DOC & REN --> TRZ["§13 · Trazabilidad con el encargo<br/>§14 · Trazabilidad con las 50 sugerencias"]
+    TRZ --> FIN["§15 · Criterio de cierre"]
+
+    style VER fill:#3a3a1a,color:#fff
+    style GAP fill:#5c1a1a,color:#fff
+    style COR fill:#5c1a1a,color:#fff
+    style FAS fill:#1a472a,color:#fff
+    style TRZ fill:#1a3a5c,color:#fff
+```
+
+### 1.5 Las 5 sugerencias que el código de rp3d desmiente
 
 No se incorporan tal cual porque parten de premisas falsas sobre la librería. Se incorporan **corregidas**, y la evidencia está en §3.3. Esto importa: cuatro de ellas describen comportamiento de **Bullet**, no de rp3d, y adoptarlas literalmente habría producido código que no compila o que no hace lo que promete.
 
@@ -82,6 +117,40 @@ No se incorporan tal cual porque parten de premisas falsas sobre la librería. S
 | #10 | "Exponer la información de islas de rp3d" | Las islas se calculan en `createIslands()` pero **no se exponen**: no hay `getIsland()` en `RigidBody` |
 | #23 | "Iterar los `ContactManifold` activos" | **No hay acceso público** a los manifolds por cuerpo; solo llegan por callback |
 | #18 | "Filtro dinámico … sin cambiar máscaras en caliente" | **No hay hook pre-narrowphase.** Cambiar la máscara en caliente *es* la solución, y rp3d la soporta |
+
+---
+
+### 1.6 Qué aporta rp3d y qué ponemos nosotros
+
+```mermaid
+flowchart LR
+    subgraph rp["Lo que trae rp3d 0.10.2 — integración"]
+        S1["6 formas de colisión"]
+        S2["4 joints + fuerzas de reacción"]
+        S3["Eventos Enter/Stay/Exit<br/>colisión y trigger"]
+        S4["Categorías, máscaras, triggers"]
+        S5["Sleeping · Raycast con máscara"]
+        S6["Broad phase AABB Tree<br/>Narrow phase SAT/GJK"]
+        S7["Interpolación de transforms<br/>userData · memoria propia"]
+    end
+    subgraph nos["Lo que construimos nosotros"]
+        H1["H1 · CCD emulado §6.17"]
+        H2["H2 · Impulso estimado §6.7"]
+        H3["H3 · Character Controller §6.11"]
+        H4["H4 · Vehículos §6.12"]
+        H5["H5 · 4 elementos de debug §6.16"]
+        C2["C2 · Overlap con cuerpo-sonda §6.9"]
+        C3["C3 · Islas propias §6.20"]
+        C4["C4 · Contactos activos §6.7"]
+    end
+    rp --> FACHADA["Fachada drone_physics<br/>handles · pimpl · pipeline"]
+    nos --> FACHADA
+    FACHADA --> JUEGO["El juego: solo ve BodyId, Vec3 y Transform"]
+
+    style rp fill:#1a472a,color:#fff
+    style nos fill:#5c1a1a,color:#fff
+    style FACHADA fill:#1a3a5c,color:#fff
+```
 
 ---
 
@@ -326,6 +395,34 @@ graph TB
 
 El `fixedStep` monolítico de v1.0 se convierte en un pipeline con puntos de extensión, para que un sistema de gameplay pueda inyectar lógica "justo antes del solver" sin tocar el manager:
 
+```mermaid
+flowchart TB
+    subgraph pre["1 · PreStep"]
+        H1["Hooks: fuerzas del juego,<br/>gravedad por zona, LOD, barrido CCD"]
+        CAP["captureTransforms<br/>solo cuerpos despiertos"]
+    end
+    subgraph step["2 · Step"]
+        UPD["world->update(dt)<br/>1 paso, o N si un cuerpo pide subpasos"]
+        CB["Callbacks de rp3d:<br/>SOLO encolan, nunca actúan"]
+    end
+    subgraph post["3 · PostStep"]
+        HK2["Hooks: romper joints, daño por contacto"]
+        DES["flushPendingDestructions<br/>destruir aquí, jamás en el callback"]
+        DIS["Despacho de eventos al EventBus"]
+    end
+    subgraph sync["4 · Sync"]
+        SY["syncTransforms → ECS<br/>solo cuerpos activos"]
+        HK3["Hooks: jerarquía, cámara"]
+    end
+    H1 --> CAP --> UPD --> CB --> HK2 --> DES --> DIS --> SY --> HK3
+    PROF["PhysicsProfiler mide cada fase"] -.-> pre & step & post & sync
+
+    style step fill:#1a472a,color:#fff
+    style PROF fill:#3a3a1a,color:#fff
+```
+
+
+
 ```cpp
 enum class PhysicsPhase { PreStep, PostStep, PostSync };
 
@@ -450,7 +547,24 @@ private:
 };
 ```
 
-Un handle liberado y reusado incrementa su generación, así que un `BodyId` viejo **no** apunta al cuerpo nuevo. Es la diferencia entre un bug detectable y una corrupción silenciosa.
+Un handle liberado y reusado incrementa su generación, así que un `BodyId` viejo **no** apunta al cuerpo nuevo. Es la diferencia entre un bug detectable y una corrupción silenciosa:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Libre
+    Libre --> Vivo : create asigna índice 7 con generación 1
+    Vivo --> Libre : destroy sube la generación a 2 y libera el índice
+    Libre --> Vivo : create reutiliza el índice 7 con generación 2
+    Vivo --> Vivo : get con handle válido
+
+    note right of Libre
+        Un BodyId antiguo de índice 7 y generación 1,
+        consultado ahora: la generación no coincide,
+        get devuelve nullptr. Sin generaciones apuntaría
+        al cuerpo NUEVO y el bug sería invisible.
+    end note
+```
+
 
 ### 6.3 API pública de `PhysicsManager`
 
@@ -663,11 +777,48 @@ std::unordered_map<BodyId, std::vector<ContactPointInfo>> m_activeContacts;
 
 Como `ContactStay` llega **cada frame** mientras el contacto dure, el mapa está siempre al día sin sondear nada. Esto es lo que habilita el daño por contacto continuo, que con solo eventos de cambio de estado no se puede hacer.
 
-**Regla dura:** los callbacks se invocan **dentro** de `world->update()`. Prohibido crear o destruir cuerpos ahí. Los puentes solo encolan; el pipeline despacha en `PostStep`.
+**Regla dura:** los callbacks se invocan **dentro** de `world->update()`. Prohibido crear o destruir cuerpos ahí. Los puentes solo encolan; el pipeline despacha en `PostStep`:
+
+```mermaid
+sequenceDiagram
+    participant RP as rp3d (dentro de update)
+    participant CB as ContactBridge
+    participant TB as TriggerBridge
+    participant MAP as Mapa de contactos activos
+    participant Q as Cola de eventos
+    participant EB as EventBus (PostStep)
+    participant J as Juego
+
+    RP->>CB: onContact(ContactStart/Stay/Exit)
+    CB->>CB: estimateImpulse con velocidad pre-paso
+    CB->>MAP: Start inserta · Stay actualiza · Exit borra
+    CB->>Q: encola ContactEvent
+    RP->>TB: onTrigger(OverlapStart/Stay/Exit)
+    TB->>Q: encola TriggerEvent (sin impulso ni masa)
+    Note over RP,Q: Aquí NO se crea ni destruye nada:<br/>el solver de rp3d sigue en curso
+    Q->>EB: dispatch tras el paso
+    EB->>J: OnCollisionEnter / OnTriggerEnter / …
+    J->>MAP: getContacts(BodyId) para daño continuo
+```
+
 
 ### 6.8 Filtrado: capas, matriz y filtro dinámico
 
 Tres niveles, del más declarativo al más dinámico:
+
+```mermaid
+flowchart TB
+    T["1 · TOML: capas con nombre<br/>+ matriz de colisión"] --> V{"¿matriz simétrica<br/>y ≤ 16 capas?"}
+    V -->|no| ERR["Error al cargar<br/>con mensaje claro"]
+    V -->|sí| L["2 · LayerRegistry compila a bits<br/>categoryBits / maskBits"]
+    L --> C["Collider en rp3d"]
+    D["3 · ContactFilter dinámico<br/>power-up: atravesar paredes"] -->|"setCollideWithMaskBits<br/>en caliente (C5)"| C
+    C --> BP["Broad phase de rp3d<br/>descarta el par antes del narrow phase"]
+
+    style ERR fill:#5c1a1a,color:#fff
+    style BP fill:#1a472a,color:#fff
+```
+
 
 1. **Capas + matriz TOML** (§4.5): la configuración normal, legible y validada al cargar.
 2. **Máscaras de bits**: lo que `LayerRegistry` genera; nadie las escribe a mano.
@@ -707,6 +858,27 @@ Las tres variantes de raycast salen del valor de retorno de `notifyRaycastHit`:
 | `closest` | `info.hitFraction` | Recorta el rayo: solo llegan impactos más cercanos |
 | `all` | `1.0` | Recorre todo |
 | `any` | `0.0` | Para en el primero — el más barato, para visibilidad |
+
+```mermaid
+flowchart LR
+    subgraph ray["Raycasts — el retorno decide el recorrido"]
+        R1["closest → devuelve hitFraction<br/>recorta el rayo"]
+        R2["all → devuelve 1.0<br/>recorre todo"]
+        R3["any → devuelve 0.0<br/>para en el primero"]
+        R4["batch(N rayos)<br/>un filtro y un buffer para todos"]
+    end
+    subgraph ov["Overlap — sin testAABBOverlap (C2)"]
+        P["Cuerpo-sonda reutilizable:<br/>estático + trigger + Box/Sphere"]
+        P --> M["Mover y redimensionar la sonda"]
+        M --> TO["testOverlap(sonda, callback)"]
+    end
+    ray --> W["PhysicsWorld"]
+    ov --> W
+    R4 -.->|"lo usa"| CC["CharacterController §6.11"]
+    TO -.->|"lo usan"| IA["IA · sonido · red"]
+
+    style ov fill:#3a3a1a,color:#fff
+```
 
 **Overlap sin `testAABBOverlap`:** se mantiene un **cuerpo-sonda** reutilizable (estático, trigger, con `BoxShape` y `SphereShape`) que se mueve y redimensiona por consulta y se pasa a `testOverlap(probe, callback)`. Coste: mover un cuerpo, no recorrer el mundo. El cuerpo-sonda se crea una vez y vive con el sistema — object pooling aplicado donde de verdad se nota.
 
@@ -811,6 +983,26 @@ flowchart LR
 ```
 
 **Regla:** nadie escribe `TransformComponent` salvo `syncTransforms`. Mover una entidad es `setTransform`/`applyForce` sobre el cuerpo — tocar el componente hace divergir física y render.
+
+**Archetypes y jerarquía, en una imagen:**
+
+```mermaid
+flowchart TB
+    subgraph arch["Archetypes: memoria contigua por combinación"]
+        A1["(Transform)<br/>decorados, luces — 3.000 entidades"]
+        A2["(Transform, Rigidbody, Collider)<br/>cuerpos físicos — 500 entidades"]
+        A3["(Transform, Rigidbody, Collider, GravityZone)<br/>zonas especiales — 12 entidades"]
+    end
+    SYNC["syncTransforms recorre SOLO<br/>los archetypes con Rigidbody"] --> A2 & A3
+    SYNC -.->|"nunca toca"| A1
+    A2 & A3 --> HIER["TransformHierarchy<br/>mundo = padre.mundo × hijo.local"]
+    HIER --> REND["Renderer"]
+    NOTA["Hijo CON cuerpo propio → FixedJoint, no jerarquía:<br/>mezclarlas hace tirar a la física contra el grafo"]
+
+    style A1 fill:#3a3a1a,color:#fff
+    style SYNC fill:#1a472a,color:#fff
+    style NOTA fill:#5c1a1a,color:#fff
+```
 
 **Jerarquía padre-hijo.** rp3d no tiene grafo de escena: un dron con accesorios, un vehículo con piezas o un personaje con arma lo necesitan. `TransformHierarchy` resuelve `mundo = padre.mundo * hijo.local` **después** de `syncTransforms`, y solo para hijos sin cuerpo propio. Un hijo **con** cuerpo propio se une al padre con un `FixedJoint`, no con jerarquía: mezclar ambas cosas produce el clásico tirón entre lo que dice la física y lo que dice el grafo.
 
@@ -957,7 +1149,23 @@ Sin LOD de física, un mundo abierto simula igual de caro lo que está a 5 m que
 | > `far` | Isla desactivada (`setActive(false)`); se reactiva al acercarse |
 | > `cull` | Descarga del mundo físico (el cuerpo se destruye y se recrea al volver) |
 
-Las bandas van a TOML. La política se apoya en el `IslandTracker`: se activa y desactiva **por isla**, nunca por cuerpo suelto, o una caja de una pila se congelaría con el resto de la pila en movimiento.
+Las bandas van a TOML. La política se apoya en el `IslandTracker`: se activa y desactiva **por isla**, nunca por cuerpo suelto, o una caja de una pila se congelaría con el resto de la pila en movimiento:
+
+```mermaid
+flowchart LR
+    PAR["Pares de contacto<br/>(ya los recibimos por eventos)"] --> UF["IslandTracker<br/>union-find §6.20"]
+    UF --> ISL["Islas: grupos de cuerpos<br/>que se tocan entre sí"]
+    ISL --> LOD["PhysicsLODSystem"]
+    JUG["Distancia al jugador"] --> LOD
+    LOD --> B1["< near: simulación completa"]
+    LOD --> B2["near-far: 1 de cada 2-3 pasos"]
+    LOD --> B3["> far: isla desactivada entera"]
+    LOD --> B4["> cull: descargada del mundo"]
+
+    style B3 fill:#3a3a1a,color:#fff
+    style B4 fill:#5c1a1a,color:#fff
+```
+
 
 ---
 
@@ -1143,29 +1351,49 @@ flowchart TB
     style REG fill:#1a3a5c,color:#fff
 ```
 
-**§10.1 · Regresión de vuelo.** Maniobras de referencia con posición y orientación esperadas y **tolerancia explícita**: despegue vertical de 2 s, hover de 10 s, caída libre desde 20 m, choque lateral contra edificio. Si un cambio de parámetros o de versión de rp3d altera el vuelo, salta. Sustituye a los tests de fórmula de la física propia.
+### 10.1 · Regresión de vuelo
 
-**§10.2 · Estrés.** Una torre de 500 cajas apiladas debe seguir en pie tras 10 s: es el "hola mundo" del estrés en motores de física y detecta regresiones en las iteraciones del solver o en `WorldSettings`. Segundo caso: 1.000 cuerpos creados y destruidos sin crecimiento de memoria (con ASan).
+Maniobras de referencia con posición y orientación esperadas y **tolerancia explícita**: despegue vertical de 2 s, hover de 10 s, caída libre desde 20 m, choque lateral contra edificio. Si un cambio de parámetros o de versión de rp3d altera el vuelo, salta. Sustituye a los tests de fórmula de la física propia.
 
-**§10.3 · Determinismo por rebobinado, dentro del mismo binario.** Simular 100 pasos, guardar el estado con `PhysicsRewindSystem`, resetear el mundo, re-simular con las mismas entradas y exigir **igualdad bit a bit**. Esto sí es válido en CI multiplataforma, porque compara el binario consigo mismo — a diferencia del test actual, que compara contra constantes grabadas.
+### 10.2 · Estrés
 
-**§10.4 · Unitarios sin rp3d.** `HandlePool` (asignar, liberar, reusar índice con generación nueva, usar handle caduco → error detectable), `LayerRegistry` (matriz asimétrica rechazada, >16 capas rechazadas), `ShapeKey` (cuantización estable), conversiones matemáticas. Son los tests más baratos y los que más bugs atrapan.
+Una torre de 500 cajas apiladas debe seguir en pie tras 10 s: es el "hola mundo" del estrés en motores de física y detecta regresiones en las iteraciones del solver o en `WorldSettings`. Segundo caso: 1.000 cuerpos creados y destruidos sin crecimiento de memoria (con ASan).
 
-**§10.5 · Integración de joints.** Péndulo con hinge (periodo aproximado), slider bajo fuerza constante (desplazamiento esperado), fixed joint (distancia invariante), ball-socket (cadena que no se desmonta). Verifican la fachada **y** avisan si rp3d cambia semántica en una actualización.
+### 10.3 · Determinismo por rebobinado, dentro del mismo binario
 
-**§10.6 · Benchmarks** con `BENCHMARK` de Catch2: `fixedStep(1/60)` con 100/500/1.000 cuerpos, `closest` en un mundo con M colliders, `syncTransforms` con K activos. Línea base registrada en `docs/physics/baseline.md`; una optimización que empeore otra métrica se ve al instante.
+Simular 100 pasos, guardar el estado con `PhysicsRewindSystem`, resetear el mundo, re-simular con las mismas entradas y exigir **igualdad bit a bit**. Esto sí es válido en CI multiplataforma, porque compara el binario consigo mismo — a diferencia del test actual, que compara contra constantes grabadas.
 
-**§10.7 · Bordes.** Masa 0 o negativa (rechazada con error definido), escala 0, velocidad NaN o infinita (saneada al entrar, nunca propagada), cuerpo sin colliders, collider sin cuerpo, handle de un cuerpo ya destruido, timestep 0 y negativo.
+### 10.4 · Unitarios sin rp3d
 
-**§10.8 · Fuzzing.** 1.000 frames con cuerpos, formas, fuerzas y destrucciones aleatorias con semilla fija: el mundo no debe crashear ni producir NaN. No sustituye a los tests dirigidos, pero encuentra los bugs de integración que nadie imagina.
+`HandlePool` (asignar, liberar, reusar índice con generación nueva, usar handle caduco → error detectable), `LayerRegistry` (matriz asimétrica rechazada, >16 capas rechazadas), `ShapeKey` (cuantización estable), conversiones matemáticas. Son los tests más baratos y los que más bugs atrapan.
+
+### 10.5 · Integración de joints
+
+Péndulo con hinge (periodo aproximado), slider bajo fuerza constante (desplazamiento esperado), fixed joint (distancia invariante), ball-socket (cadena que no se desmonta). Verifican la fachada **y** avisan si rp3d cambia semántica en una actualización.
+
+### 10.6 · Benchmarks
+
+Con `BENCHMARK` de Catch2: `fixedStep(1/60)` con 100/500/1.000 cuerpos, `closest` en un mundo con M colliders, `syncTransforms` con K activos. Línea base registrada en `docs/physics/baseline.md`; una optimización que empeore otra métrica se ve al instante.
+
+### 10.7 · Bordes
+
+Masa 0 o negativa (rechazada con error definido), escala 0, velocidad NaN o infinita (saneada al entrar, nunca propagada), cuerpo sin colliders, collider sin cuerpo, handle de un cuerpo ya destruido, timestep 0 y negativo.
+
+### 10.8 · Fuzzing
+
+1.000 frames con cuerpos, formas, fuerzas y destrucciones aleatorias con semilla fija: el mundo no debe crashear ni producir NaN. No sustituye a los tests dirigidos, pero encuentra los bugs de integración que nadie imagina.
 
 ---
 
 ## 11. Documentación
 
-**§11.1 · `docs/physics/` con guías por caso de uso**, no solo referencia de API. Lo que un desarrollador necesita el primer día: *cómo añadir un cuerpo estático*, *cómo hacer un proyectil*, *cómo configurar capas*, *cómo depurar un cuerpo que atraviesa el suelo*, *cómo perfilar un frame lento*. La referencia se genera; las guías se escriben.
+### 11.1 · `docs/physics/` con guías por caso de uso
 
-**§11.2 · `docs/physics/MIGRATION.md`** — la diferencia de comportamiento entre la física propia y rp3d, por escrito y **antes** de que alguien pregunte por qué el dron se siente raro:
+, no solo referencia de API. Lo que un desarrollador necesita el primer día: *cómo añadir un cuerpo estático*, *cómo hacer un proyectil*, *cómo configurar capas*, *cómo depurar un cuerpo que atraviesa el suelo*, *cómo perfilar un frame lento*. La referencia se genera; las guías se escriben.
+
+### 11.2 · `docs/physics/MIGRATION.md`
+
+La diferencia de comportamiento entre la física propia y rp3d, por escrito y **antes** de que alguien pregunte por qué el dron se siente raro:
 
 | Antes (física propia) | Ahora (rp3d) | Qué ajustar |
 |---|---|---|
@@ -1174,11 +1402,17 @@ flowchart TB
 | Sin rotación (el dron era un punto) | Cuerpo con inercia: puede volcar | `angular_damping`, centro de masa |
 | Colisión = evento con velocidad de impacto | Contacto con normal, penetración e impulso estimado | Umbral de choque en `[physics]` |
 
-**§11.3 · `docs/physics/CHANGELOG-fisica.md` desde la Fase 1.** Cada cambio de parámetro en `game.toml`, cada tolerancia ajustada en un test, cada tipo de cuerpo nuevo. Cuando en la Fase 4 el dron deje de flotar bien, poder señalar el cambio concreto de la Fase 3 vale más que un día de bisect.
+### 11.3 · `docs/physics/CHANGELOG-fisica.md` desde la Fase 1
 
-**§11.4 · Diagramas de secuencia** para lo complejo: character controller (§6.11), vehículo (§6.12) y CCD emulado (§6.17) ya los tienen en este documento; se mantienen sincronizados con el código.
+Cada cambio de parámetro en `game.toml`, cada tolerancia ajustada en un test, cada tipo de cuerpo nuevo. Cuando en la Fase 4 el dron deje de flotar bien, poder señalar el cambio concreto de la Fase 3 vale más que un día de bisect.
 
-**§11.5 · El "por qué" en las cabeceras.** Los ADR cubren la decisión macro; el comentario de cabecera cubre la implementación. `PhysicsManager.h` abre explicando por qué existe el módulo, por qué usa pimpl y por qué no expone rp3d — para el que abre el fichero sin haber leído ningún ADR.
+### 11.4 · Diagramas de secuencia
+
+Para lo complejo: character controller (§6.11), vehículo (§6.12) y CCD emulado (§6.17) ya los tienen en este documento; se mantienen sincronizados con el código.
+
+### 11.5 · El "por qué" en las cabeceras
+
+Los ADR cubren la decisión macro; el comentario de cabecera cubre la implementación. `PhysicsManager.h` abre explicando por qué existe el módulo, por qué usa pimpl y por qué no expone rp3d — para el que abre el fichero sin haber leído ningún ADR.
 
 ---
 
@@ -1236,6 +1470,43 @@ flowchart TB
 ---
 
 ## 14. Trazabilidad con las 50 sugerencias
+
+Las 50 se agrupan por lo que tocan. Ninguna queda sin destino: el mapa muestra **dónde vive cada grupo** y las cinco que se incorporan corregidas.
+
+```mermaid
+flowchart LR
+    subgraph g1["Arquitectura 1-12"]
+        A["1 Debugger · 3 Capas · 5 Puentes<br/>7 Archetypes · 8 Query · 9 Joints<br/>12 Pipeline"]
+        A2["2 Settings · 6 Profiler<br/>10 Islas* · 11 Jerarquía · 4 Subpasos*"]
+    end
+    subgraph g2["Técnicas 13-24"]
+        B["13 ShapeKey · 14 Lote · 15 Masa auto<br/>16 userData · 17 HandlePool · 22 Rayos en lote<br/>19 Gravedad zonal · 20 Assets · 21 Rewind · 24 Joints"]
+        B2["18 Filtro* · 23 Contactos*"]
+    end
+    subgraph g3["Pruebas 25-32"]
+        C["Regresión · Estrés · Rebobinado · HandlePool<br/>Joints · Benchmarks · Bordes · Fuzzing"]
+    end
+    subgraph g4["Proyecto 33-40"]
+        D["Fase 2.5 · Demo por fase · Baseline<br/>Limpieza · Savegames · Fase -1 · Rangos · Contingencias"]
+    end
+    subgraph g5["Docs 41-45 · Rendimiento 46-48 · Cierre 49-50"]
+        E["Guías · MIGRATION · CHANGELOG<br/>Diagramas · Cabeceras · LOD"]
+        E2["47 Subpasos internos* · 48 testAABBOverlap*"]
+    end
+
+    g1 --> S4["§4 Decisiones + §5 Arquitectura"]
+    g2 --> S6["§6 Subsistemas"]
+    g3 --> S10["§10 Pruebas"]
+    g4 --> S8["§8 Fases + §9 Riesgos"]
+    g5 --> S11["§11 Docs + §12 Rendimiento + §15 Cierre"]
+
+    A2 -.-> COR["* Incorporadas CORREGIDAS<br/>§3.3 C1-C5: el código de rp3d<br/>desmiente la premisa"]
+    B2 -.-> COR
+    E2 -.-> COR
+
+    style COR fill:#5c1a1a,color:#fff
+    style g3 fill:#1a3a5c,color:#fff
+```
 
 | # | Sugerencia | Dónde |
 |---|---|---|
