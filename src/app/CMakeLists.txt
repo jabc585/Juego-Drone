@@ -5,10 +5,15 @@ add_executable(DroneFlightSim
     SaveManager.cpp
 )
 
-target_link_libraries(DroneFlightSim
-    PRIVATE drone_frontend_terminal drone_warnings
-    tomlplusplus::tomlplusplus spdlog::spdlog
-)
+set(DRONE_LIBS drone_frontend_terminal drone_warnings tomlplusplus::tomlplusplus spdlog::spdlog)
+
+if(TARGET drone_frontend_raylib)
+    list(APPEND DRONE_LIBS drone_frontend_raylib)
+    target_compile_definitions(DroneFlightSim PRIVATE DRONE_HAS_RAYLIB=1)
+endif()
+
+target_link_libraries(DroneFlightSim PRIVATE ${DRONE_LIBS})
+
 target_compile_definitions(DroneFlightSim
     PRIVATE DRONE_VERSION="${PROJECT_VERSION}"
 )

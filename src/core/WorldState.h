@@ -1,8 +1,10 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "core/GameState.h"
+#include "core/Obstacle.h"
 #include "core/math/Vec3.h"
 
 namespace drone {
@@ -20,6 +22,8 @@ struct WorldState {
     int experienceToNext = 100;
     GameState state = GameState::Booting;
     std::string environmentName;
+    // Geometría del nivel: el frontend dibuja exactamente lo que colisiona.
+    std::vector<Obstacle> obstacles;
 };
 
 }  // namespace drone

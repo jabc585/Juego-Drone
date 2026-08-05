@@ -8,15 +8,25 @@ y este proyecto adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 ## [Unreleased]
 
 ### Added
+- Frontend gráfico 3D con raylib (`--gui`): vista con cámara que sigue al dron, sombra proyectada, obstáculos del nivel, HUD y overlay de pausa/fin de partida. El core no se tocó para añadirlo, que era el criterio de aceptación de PLAN3 P0-5.
+- `WorldState` expone la geometría del nivel (`obstacles`), de modo que el frontend dibuja exactamente lo que colisiona.
 - Guardado/carga de partida (F5/F9 y autocarga al arrancar) en el directorio de datos del usuario, formato TOML versionado con validación estricta — se rechazan saves corruptos, con NaN/inf o con estados ilegales (PLAN3 P0-4).
 - Configuración en runtime desde `assets/config/game.toml` (toml++): `GameConfig` inyectada, valores fuera de rango truncados con aviso (PLAN3 P0-2).
 - Logging estructurado con spdlog en la capa app, suscrito al EventBus; el core sigue sin I/O (PLAN3 P0-1).
 - Eventos `GameSaved`/`GameLoaded` con mensaje en el HUD y en el log.
-- Tests de GameController, Environment y casos límite; suite total 71 (PLAN3 P0-3, P2-2, P2-4).
+- Tests de GameController, Environment, casos límite y geometría del snapshot; suite total 72 (PLAN3 P0-3, P2-2, P2-4).
 - Restauración de la terminal ante SIGINT/SIGTERM/SIGHUP y salida anómala (PLAN3 P2-6).
 - ADRs 004–007 y job de cobertura en CI.
 
 ### Fixed
+- El modo terminal abría una ventana gráfica y volcaba los logs de raylib sobre el HUD: `main` construía todos los frontends, y los constructores tienen efectos colaterales (raw mode, ventana GL). Ahora solo se construye el elegido.
+- En modo gráfico, `RaylibInput` releía el teclado en cada una de las hasta 32 llamadas a `poll()` por frame: una pulsación de `P` alternaba la pausa 32 veces (efecto neto: nada) y `F5` guardaba 32 veces. Ahora el estado del teclado se lee una vez por frame y se sirve desde una cola.
+- En modo gráfico, mantener una tecla de movimiento impedía por completo pausar, guardar o reiniciar: `poll()` devolvía en el primer `if` y nunca llegaba a las teclas de acción.
+- El renderer gráfico dibujaba una copia hardcodeada de los obstáculos, que podía divergir de los que simula la física.
+- La cámara era fija: el dron se perdía de vista en cuanto se alejaba del origen (el mundo mide 200 m de lado).
+- En modo gráfico no había ninguna indicación de pausa ni de fin de partida; la escena simplemente se congelaba.
+- `SetTargetFPS(0)` dejaba el render sin límite; ahora 60 FPS. Los ~30 logs INFO de raylib al arrancar se silencian.
+- El frontend de raylib se compilaba sin los warnings del proyecto; ahora enlaza `drone_warnings`.
 - El bucle de `main` llamaba `tick(0.0f)` sin reloj ni sleep: el mundo no avanzaba nunca y la CPU iba al 100 %; ahora mide el tiempo real de frame como `GameController::run()`.
 - `saveGame` desreferenciaba un puntero nulo al construir el TOML (crash al guardar) y nunca creaba el directorio de guardado (el primer guardado fallaba siempre).
 - Un `game.toml` o `save.toml` malformado abortaba el proceso en builds Debug por una aserción interna de toml++; ahora toda entrada inválida degrada a aviso + defaults (`app/TomlSafe.h`).

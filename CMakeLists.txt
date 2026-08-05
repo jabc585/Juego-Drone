@@ -41,6 +41,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(tomlplusplus spdlog)
 
+# El fmt embebido de spdlog usa char_traits<char8_type>, deprecado en libc++.
+# Es código de la dependencia: se silencia para no ahogar los avisos propios.
+if(TARGET spdlog AND NOT MSVC)
+    target_compile_options(spdlog PRIVATE -Wno-deprecated-declarations)
+endif()
+
 add_subdirectory(src/core)
 add_subdirectory(src/frontend)
 add_subdirectory(src/app)

@@ -30,6 +30,7 @@ WorldState World::snapshot() const {
     s.difficulty = m_environment.difficulty();
     s.simTime = m_simTime;
     s.environmentName = m_environment.name();
+    s.obstacles = m_environment.obstacles();
     return s;
 }
 

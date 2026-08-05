@@ -7,8 +7,10 @@
 using drone::Event;
 using drone::EventType;
 using drone::GameConfig;
+using drone::Obstacle;
 using drone::Vec3;
 using drone::World;
+using drone::WorldState;
 
 namespace {
 
@@ -97,6 +99,31 @@ TEST_CASE("World: obstacle collision pushes the drone out and notifies", "[World
     const bool insideY = std::fabs(p.y - 5.0f) < 5.0f + cfg.droneRadius;
     const bool insideZ = std::fabs(p.z - 8.0f) < 1.0f + cfg.droneRadius;
     REQUIRE_FALSE((insideX && insideY && insideZ));
+}
+
+TEST_CASE("World: snapshot exposes the same obstacles the physics collides with",
+          "[World][integration]") {
+    GameConfig cfg;
+    World w(cfg);
+    // Sin nivel cargado no hay geometría que dibujar.
+    REQUIRE(w.snapshot().obstacles.empty());
+
+    w.environment().loadEnvironment("Ciudad Futurista");
+    const WorldState s = w.snapshot();
+
+    // El frontend debe dibujar exactamente lo que el motor colisiona: si el
+    // renderer usa su propia copia, la escena miente sobre el mundo real.
+    REQUIRE(s.obstacles.size() == w.environment().obstacles().size());
+    REQUIRE_FALSE(s.obstacles.empty());
+    for (std::size_t i = 0; i < s.obstacles.size(); ++i) {
+        const Obstacle& expected = w.environment().obstacles()[i];
+        REQUIRE(s.obstacles[i].center.x == expected.center.x);
+        REQUIRE(s.obstacles[i].center.y == expected.center.y);
+        REQUIRE(s.obstacles[i].center.z == expected.center.z);
+        REQUIRE(s.obstacles[i].size.x == expected.size.x);
+        REQUIRE(s.obstacles[i].size.y == expected.size.y);
+        REQUIRE(s.obstacles[i].size.z == expected.size.z);
+    }
 }
 
 TEST_CASE("World: reset restores a fresh deterministic world", "[World][integration]") {

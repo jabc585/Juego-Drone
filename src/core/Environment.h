@@ -6,14 +6,10 @@
 #include <vector>
 
 #include "core/GameConfig.h"
+#include "core/Obstacle.h"
 #include "core/math/Vec3.h"
 
 namespace drone {
-
-struct Obstacle {
-    Vec3 center;
-    Vec3 size;
-};
 
 class Environment {
 public:

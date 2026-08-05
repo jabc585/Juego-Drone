@@ -2,22 +2,25 @@
 
 [![CI](https://github.com/jabc585/Juego-Drone/actions/workflows/ci.yml/badge.svg)](https://github.com/jabc585/Juego-Drone/actions/workflows/ci.yml)
 
-Simulador de vuelo de dron en terminal, en tiempo real: física con empuje, gravedad, arrastre y rachas de viento; batería; obstáculos; progresión por niveles y HUD ANSI a 60 FPS.
+Simulador de vuelo de dron en tiempo real: física con empuje, gravedad, arrastre y rachas de viento; batería; obstáculos; progresión por niveles y guardado de partida. Dos frontends sobre el mismo motor: HUD ANSI en terminal y vista 3D con raylib.
 
 ## Requisitos
 
 - CMake ≥ 3.21
 - Compilador C++17 (Clang, GCC o MSVC)
+- Opcional: [raylib](https://www.raylib.com/) para el modo gráfico (`brew install raylib`). Si no está instalada, el proyecto compila igual y solo ofrece el modo terminal.
 
 ## Compilación y ejecución
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
-./build/src/app/DroneFlightSim
+
+./build/src/app/DroneFlightSim          # modo terminal (HUD ANSI)
+./build/src/app/DroneFlightSim --gui    # modo gráfico 3D (requiere raylib)
 ```
 
-> El frontend interactivo de terminal está soportado en macOS/Linux; en Windows el soporte interactivo llega con el frontend gráfico (ver [PLAN3.md](PLAN3.md)).
+> El modo terminal interactivo está soportado en macOS/Linux; en Windows usa el modo gráfico.
 
 ## Controles
 
@@ -26,10 +29,13 @@ cmake --build build --parallel
 | `W`/`A`/`S`/`D` o flechas | mover |
 | `Q` / `E` | ascender / descender |
 | `P` | pausa |
+| `F5` / `F9` | guardar / cargar partida |
 | `R` | reiniciar (tras fin de partida) |
 | `X` o `Esc` | salir |
 
 `DroneFlightSim --help` muestra esta ayuda; `--version`, la versión.
+
+La partida se guarda en el directorio de datos del usuario (`~/Library/Application Support/Juego-Drone` en macOS, `$XDG_DATA_HOME/Juego-Drone` en Linux) y se carga automáticamente al arrancar. Los parámetros de juego se ajustan en [assets/config/game.toml](assets/config/game.toml) sin recompilar.
 
 ## Tests
 

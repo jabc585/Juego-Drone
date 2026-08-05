@@ -1,14 +1,22 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <thread>
 
 #include "app/ConfigLoader.h"
 #include "app/GameLogger.h"
 #include "app/SaveManager.h"
 #include "core/GameController.h"
+#include "frontend/IInputSource.h"
+#include "frontend/IRenderer.h"
 #include "frontend/terminal/TerminalInput.h"
 #include "frontend/terminal/TerminalRenderer.h"
+
+#ifdef DRONE_HAS_RAYLIB
+#include "frontend/raylib/RaylibInput.h"
+#include "frontend/raylib/RaylibRenderer.h"
+#endif
 
 #ifndef DRONE_VERSION
 #define DRONE_VERSION "0.0.0-dev"
@@ -19,7 +27,11 @@ namespace {
 void printHelp() {
     std::puts("DroneFlightSim " DRONE_VERSION
               "\n"
-              "Uso: DroneFlightSim [--version] [--help]\n\n"
+              "Uso: DroneFlightSim [--version] [--help]"
+#ifdef DRONE_HAS_RAYLIB
+              " [--gui]"
+#endif
+              "\n  --gui    usar frontend grafico (raylib) en vez de terminal\n\n"
               "Controles:\n"
               "  W/A/S/D o flechas  mover\n"
               "  Q / E              ascender / descender\n"
@@ -33,6 +45,7 @@ void printHelp() {
 }  // namespace
 
 int main(int argc, char** argv) {
+    bool useGui = false;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--version") == 0) {
             std::puts("DroneFlightSim " DRONE_VERSION);
@@ -42,6 +55,14 @@ int main(int argc, char** argv) {
             printHelp();
             return 0;
         }
+        if (std::strcmp(argv[i], "--gui") == 0) {
+#ifdef DRONE_HAS_RAYLIB
+            useGui = true;
+#else
+            std::fputs("Frontend grafico no compilado (raylib no encontrada).\n", stderr);
+            return 1;
+#endif
+        }
     }
 
     drone::GameConfig config = drone::loadConfig("assets/config/game.toml");
@@ -50,20 +71,30 @@ int main(int argc, char** argv) {
     drone::GameLogger logger;
     logger.info("Juego iniciado (v" DRONE_VERSION ")");
 
-    drone::TerminalInput input;
-    drone::TerminalRenderer renderer;
-    drone::GameController game(input, renderer, config);
+    // Solo se construye el frontend elegido: los constructores tienen efectos
+    // colaterales (raw mode de la terminal, apertura de la ventana GL) que no
+    // deben ocurrir en el modo que no se está usando.
+    std::unique_ptr<drone::IInputSource> input;
+    std::unique_ptr<drone::IRenderer> renderer;
+#ifdef DRONE_HAS_RAYLIB
+    if (useGui) {
+        input = std::make_unique<drone::RaylibInput>();
+        renderer = std::make_unique<drone::RaylibRenderer>();
+    }
+#endif
+    if (!input) {
+        input = std::make_unique<drone::TerminalInput>();
+        renderer = std::make_unique<drone::TerminalRenderer>();
+    }
 
+    drone::GameController game(*input, *renderer, config);
     logger.attach(game.getEventBus());
 
-    // Carga automatica de partida guardada si existe
     if (auto old = drone::loadGame(drone::saveFilePath()); old.version > 0) {
         game.applyLoad(old);
         logger.info("Partida guardada cargada");
     }
 
-    // Mismo bucle temporal que GameController::run(), pero intercalando el
-    // manejo de guardado/carga (I/O que el core no puede hacer).
     using clock = std::chrono::steady_clock;
     auto last = clock::now();
 
