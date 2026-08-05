@@ -2,9 +2,11 @@
 
 > **Encargo:** sustituir la física propia por **ReactPhysics3D** (exclusivamente: ni Box2D, ni Bullet, ni PhysX, ni Jolt), con un módulo `PhysicsManager` modular y desacoplado del renderizado, integrado de forma nativa con raylib.
 >
-> **Base:** commit `1da1216` · juego actual v0.5.0 · **rp3d v0.10.2 verificado contra su código fuente**, no contra documentación.
+> **Base:** commit `1da1216` · juego v0.5.0 · **rp3d v0.10.2 verificado contra su código fuente**, no contra documentación.
 >
-> **Linaje:** [PLAN3.md](PLAN3.md) (auditoría y hoja de ruta a v1.0) → **grafico.md** (motor de físicas 3D). Este documento sustituye la tarea P0-5/P1 de física de PLAN3 y **revierte la decisión ADR-004**.
+> **Versión 2.0** — incorpora 50 sugerencias de revisión. Lo que cambia respecto a v1.0 está en §1.3. **Cinco de esas sugerencias describen comportamiento que rp3d no tiene**; se incorporan corregidas y con evidencia en §3.3.
+>
+> **Linaje:** [PLAN3.md](PLAN3.md) → **grafico.md**. Sustituye la tarea de física de PLAN3 y **revierte ADR-004**.
 
 ---
 
@@ -12,14 +14,19 @@
 
 1. [Resumen ejecutivo](#1-resumen-ejecutivo)
 2. [Punto de partida: qué es el juego hoy](#2-punto-de-partida-qué-es-el-juego-hoy)
-3. [ReactPhysics3D 0.10.2: lo verificado y los 5 huecos](#3-reactphysics3d-0102-lo-verificado-y-los-5-huecos)
-4. [ADR-008: decisiones de arquitectura](#4-adr-008-decisiones-de-arquitectura)
+3. [ReactPhysics3D 0.10.2 verificado](#3-reactphysics3d-0102-verificado)
+4. [Decisiones de arquitectura (ADR-008 a ADR-013)](#4-decisiones-de-arquitectura-adr-008-a-adr-013)
 5. [Arquitectura propuesta](#5-arquitectura-propuesta)
 6. [Diseño técnico por subsistema](#6-diseño-técnico-por-subsistema)
 7. [Impacto sobre lo que ya funciona](#7-impacto-sobre-lo-que-ya-funciona)
 8. [Plan por fases con criterios de aceptación](#8-plan-por-fases-con-criterios-de-aceptación)
-9. [Riesgos](#9-riesgos)
-10. [Trazabilidad con el encargo](#10-trazabilidad-con-el-encargo)
+9. [Riesgos, disparadores y contingencias](#9-riesgos-disparadores-y-contingencias)
+10. [Estrategia de pruebas](#10-estrategia-de-pruebas)
+11. [Documentación](#11-documentación)
+12. [Rendimiento y optimización](#12-rendimiento-y-optimización)
+13. [Trazabilidad con el encargo](#13-trazabilidad-con-el-encargo)
+14. [Trazabilidad con las 50 sugerencias](#14-trazabilidad-con-las-50-sugerencias)
+15. [Cierre: lecciones ajenas y criterio de completitud](#15-cierre-lecciones-ajenas-y-criterio-de-completitud)
 
 ---
 
@@ -34,24 +41,47 @@ El encargo es **viable e integrable con la arquitectura actual**, que ya separa 
 | Cuerpos simulados | 1 dron + 3 cajas estáticas | N cuerpos con ECS, joints, character controller, vehículos |
 | Física | 99 líneas propias (Euler semi-implícito + AABB) | rp3d 0.10.2 (~13 MB de fuentes) |
 | Formas de colisión | AABB únicamente | 6 tipos, múltiples colliders por cuerpo |
-| Alcance del proyecto | Simulador de dron | Base para "mundo abierto, shooters, simuladores" |
-| Esfuerzo estimado | — | **~22 semanas** de un desarrollador |
+| Alcance | Simulador de dron | Base para "mundo abierto, shooters, simuladores" |
+| Esfuerzo | — | **23–36 semanas** (central ≈ 29) de un desarrollador |
 
-Esto es un **re-encuadre del proyecto**, no una mejora incremental. Es una decisión legítima —el encargo lo dice explícitamente— pero debe tomarse a sabiendas: buena parte del trabajo (vehículos, character controller, heightfields) no la necesita el juego del dron, sino el motor que se quiere construir con él. El plan está secuenciado para que **el dron siga jugable en todas las fases** y para que lo que sí usa el juego llegue primero.
+Esto es un **re-encuadre del proyecto**, no una mejora incremental. Es una decisión legítima —el encargo lo dice— pero debe tomarse a sabiendas: buena parte del trabajo (vehículos, character controller, heightfields, LOD) no la necesita el juego del dron, sino el motor que se quiere construir con él. El plan está secuenciado para que **el dron siga jugable en todas las fases** y para que lo que sí usa el juego llegue primero.
 
 ### 1.2 Los 5 huecos entre el encargo y la librería
 
-Verificados leyendo los headers de rp3d 0.10.2, no su web. Cada uno tiene solución propuesta en §6:
+Verificados leyendo los headers y las fuentes de rp3d 0.10.2. Cada uno con solución en §6:
 
 | # | El encargo pide | rp3d 0.10.2 | Solución |
 |---|---|---|---|
-| H1 | Continuous Collision Detection | **No existe.** Cero menciones en toda la API pública | Emular con subpasos + raycast de barrido (§6.14) |
-| H2 | Evento con *fuerza del impacto* e *impulso aplicado* | El callback expone solo penetración, normal y puntos locales | Estimar el impulso con las velocidades pre-paso (§6.5) |
-| H3 | Character Controller | **No existe.** Hay que escribirlo entero | Cápsula kinemática + raycasts (§6.9) |
-| H4 | Vehículos | **No existe** (ni raycast vehicle) | Chasis + 4 raycasts como suspensión (§6.10) |
-| H5 | 13 elementos de debug | El `DebugRenderer` cubre 6 | Los 4 restantes se dibujan con raylib (§6.13) |
+| H1 | Continuous Collision Detection | **No existe.** Cero menciones en toda la API | Barrido por raycast por cuerpo + subpasos globales (§6.17) |
+| H2 | Evento con *fuerza* e *impulso* | El callback expone solo penetración, normal y puntos locales | Estimar con velocidades pre-paso (§6.7) |
+| H3 | Character Controller | **No existe** | Cápsula kinemática + raycasts en lote (§6.11) |
+| H4 | Vehículos | **No existe** (ni raycast vehicle) | Chasis + 4 raycasts de suspensión (§6.12) |
+| H5 | 13 elementos de debug | El `DebugRenderer` cubre 6 | 6 nativos + 4 propios (§6.16) |
 
-Ninguno invalida la elección de rp3d, pero H1 y H2 son sorpresas caras si se descubren a mitad de la implementación.
+### 1.3 Qué cambia en la versión 2.0
+
+Las 50 sugerencias de revisión se incorporan íntegras (trazabilidad una a una en §14). Los cambios estructurales:
+
+- **`PhysicsManager` deja de ser un dios.** Se parte en sistemas: `PhysicsQuerySystem`, `JointSystem`, `CharacterController`, `VehicleSystem`, `PhysicsProfiler`, `PhysicsRewindSystem`, `PhysicsLODSystem`, más un `IPhysicsDebugger` como suscriptor (§4.4).
+- **Un `PhysicsPipeline` con fases y ganchos** sustituye al `fixedStep` monolítico (§5.1).
+- **Sistema de capas con matriz de colisión en TOML** encima de las máscaras de bits (§4.5).
+- **ECS con archetypes**, no arrays sueltos, más jerarquía padre-hijo (§6.13).
+- **El profiler entra en la Fase 1**, no en la 6: optimizar sin medir es adivinar (§6.18).
+- **Sección de pruebas propia** (§10) con estrés, determinismo por rebobinado, benchmarks y fuzzing.
+- **Fases nuevas:** una Fase −1 condicional de formación, una Fase 2.5 de integración vertical, y demo jugable al final de **cada** fase.
+- **Estimaciones con rango** optimista/pesimista y **contingencia por riesgo** con disparador explícito (§9).
+
+### 1.4 Las 5 sugerencias que el código de rp3d desmiente
+
+No se incorporan tal cual porque parten de premisas falsas sobre la librería. Se incorporan **corregidas**, y la evidencia está en §3.3. Esto importa: cuatro de ellas describen comportamiento de **Bullet**, no de rp3d, y adoptarlas literalmente habría producido código que no compila o que no hace lo que promete.
+
+| Sugerencia | Premisa | Realidad verificada |
+|---|---|---|
+| #47 | "rp3d subdivide `dt` internamente" | `PhysicsWorld::update()` da **un** paso. Sin `maxSubSteps`. Eso es `btDynamicsWorld::stepSimulation` |
+| #48 | "`world->testAABBOverlap(aabb, callback)` … rp3d lo soporta" | **Ese método no existe.** Hay `testOverlap(Body*, …)` y `testCollision(…)`, siempre contra un cuerpo |
+| #10 | "Exponer la información de islas de rp3d" | Las islas se calculan en `createIslands()` pero **no se exponen**: no hay `getIsland()` en `RigidBody` |
+| #23 | "Iterar los `ContactManifold` activos" | **No hay acceso público** a los manifolds por cuerpo; solo llegan por callback |
+| #18 | "Filtro dinámico … sin cambiar máscaras en caliente" | **No hay hook pre-narrowphase.** Cambiar la máscara en caliente *es* la solución, y rp3d la soporta |
 
 ---
 
@@ -64,53 +94,54 @@ src/core/          drone_core — simulación pura, CERO I/O (la CI lo verifica 
   GameController   máquina de estados + bucle de timestep fijo a 60 Hz
   World            agrega Drone + Environment + PhysicsEngine + EventBus
   PhysicsEngine    99 líneas: empuje, gravedad, arrastre, suelo, límites, AABB, batería
-  Drone            estado (posición, velocidad, empuje, batería) — sin lógica de integración
+  Drone            estado (posición, velocidad, empuje, batería)
   Environment      viento por rachas con semilla, dificultad, obstáculos AABB
   EventBus         pub/sub tipado (BatteryLow, Collision, LevelUp, GameSaved…)
   WorldState       DTO inmutable que el core entrega al frontend cada frame
 src/frontend/      IRenderer / IInputSource + terminal (HUD ANSI) + raylib (3D)
-src/app/           main (composición), ConfigLoader (toml++), SaveManager, GameLogger (spdlog)
+src/app/           main, ConfigLoader (toml++), SaveManager, GameLogger (spdlog)
 ```
 
 **Lo que condiciona este plan:**
 
-1. **El core no hace I/O y la CI lo bloquea** (`! grep -rn 'cout\|cin\|printf' src/core/`). rp3d no hace I/O, así que el guard sobrevive — pero el core deja de tener cero dependencias.
-2. **Todo el estado de simulación es autoritativo en el core y viaja al frontend por `WorldState`.** Con rp3d, el estado autoritativo pasa a vivir dentro del mundo físico; `WorldState` se convierte en una proyección.
-3. **Hay un test de determinismo** (`misma semilla + mismos comandos ⇒ misma trayectoria, comparada con `==` de floats`). rp3d es determinista con el mismo binario, **no entre plataformas**: ese test debe reescribirse (§7).
-4. **`GameConfig` inyecta todos los parámetros desde TOML.** La configuración de física de rp3d debe entrar por el mismo sitio, no por constantes nuevas.
-5. **`assets/levels/city.json` existe pero no lo lee nadie**: los obstáculos están hardcodeados en `Environment::loadEnvironment`. La llegada de formas de colisión reales es el momento natural de conectarlo.
-6. **No hay mallas 3D en el proyecto.** Convex mesh, concave mesh y heightfield no tienen datos que cargar: exigen antes un pipeline de assets (§8, Fase 4).
+1. **El core no hace I/O y la CI lo bloquea.** rp3d tampoco hace I/O, así que el guard sobrevive — pero el core deja de tener cero dependencias.
+2. **El estado autoritativo vive en el core y viaja por `WorldState`.** Con rp3d pasa a vivir en el mundo físico; `WorldState` se vuelve una proyección.
+3. **Hay un test de determinismo** que compara trayectorias con `==` de floats. rp3d es determinista con el mismo binario, **no entre plataformas**: hay que reescribirlo (§7, §10.3).
+4. **`GameConfig` inyecta todo desde TOML.** La configuración de rp3d entra por ahí, no por constantes nuevas (§6.1).
+5. **`assets/levels/city.json` existe y no lo lee nadie.** Los obstáculos están hardcodeados; la Fase 3 lo conecta.
+6. **No hay mallas 3D en el proyecto.** Convex, concave y heightfield no tienen datos: exigen antes un proveedor de assets (§6.14).
 
 ---
 
-## 3. ReactPhysics3D 0.10.2: lo verificado y los 5 huecos
+## 3. ReactPhysics3D 0.10.2 verificado
 
-Todo lo de esta sección procede de leer `include/reactphysics3d/` del tag `v0.10.2`.
-
-### 3.1 Lo que sí trae (todo lo que el encargo pide en estos apartados)
+### 3.1 Lo que sí trae
 
 | Apartado | Estado | Evidencia |
 |---|---|---|
-| **6 formas de colisión** | ✅ Completo | `collision/shapes/`: `BoxShape.h`, `SphereShape.h`, `CapsuleShape.h`, `ConvexMeshShape.h`, `ConcaveMeshShape.h`, `HeightFieldShape.h` |
-| **4 joints** | ✅ Completo | `constraint/`: `BallAndSocketJoint.h`, `HingeJoint.h`, `SliderJoint.h`, `FixedJoint.h` |
-| **Eventos de colisión Enter/Stay/Exit** | ✅ | `CollisionCallback.h`: `ContactStart`, `ContactStay`, `ContactExit` |
-| **Eventos de trigger Enter/Stay/Exit** | ✅ | `OverlapCallback.h`: `OverlapStart`, `OverlapStay`, `OverlapExit` |
-| **Filtrado por categorías y máscaras** | ✅ | `Collider::setCollisionCategoryBits()` / `setCollideWithMaskBits()` |
-| **Triggers sin respuesta física** | ✅ | `Collider::setIsTrigger(bool)` |
-| **Sleeping automático** | ✅ | `WorldSettings::isSleepingEnabled` (por defecto `true`), `RigidBody::setIsAllowedToSleep()`, `PhysicsWorld::setSleepLinearVelocity()` |
-| **Raycast con máscara** | ✅ | `PhysicsWorld::raycast(const Ray&, RaycastCallback*, unsigned short categoryMask = 0xFFFF)` |
-| **Datos del impacto de raycast** | ✅ | `RaycastInfo`: `worldPoint`, `worldNormal`, `hitFraction`, `triangleIndex`, `body`, `collider` |
-| **Interpolación para el render** | ✅ | `Transform::interpolateTransforms(old, new, factor)` — exactamente lo que necesita nuestro acumulador |
-| **Gestión de memoria propia** | ✅ | `PhysicsCommon(MemoryAllocator* baseMemoryAllocator = nullptr)` |
-| **Broad phase / narrow phase** | ✅ Interno | Dynamic AABB Tree + SAT/GJK, sin API que configurar: se obtiene "gratis" |
+| **6 formas de colisión** | ✅ | `collision/shapes/`: `BoxShape.h`, `SphereShape.h`, `CapsuleShape.h`, `ConvexMeshShape.h`, `ConcaveMeshShape.h`, `HeightFieldShape.h` |
+| **4 joints** | ✅ | `constraint/`: `BallAndSocketJoint.h`, `HingeJoint.h`, `SliderJoint.h`, `FixedJoint.h` |
+| **Fuerzas de reacción de joints** | ✅ | `Joint::getReactionForce(dt)`, `getReactionTorque(dt)`, `HingeJoint::getMotorTorque(dt)` |
+| **Colisión Enter/Stay/Exit** | ✅ | `CollisionCallback.h`: `ContactStart`, `ContactStay`, `ContactExit` |
+| **Trigger Enter/Stay/Exit** | ✅ | `OverlapCallback.h`: `OverlapStart`, `OverlapStay`, `OverlapExit` |
+| **Categorías y máscaras** | ✅ | `Collider::setCollisionCategoryBits()` / `setCollideWithMaskBits()` — **modificables en runtime** |
+| **Triggers** | ✅ | `Collider::setIsTrigger(bool)` |
+| **Sleeping** | ✅ | `WorldSettings::isSleepingEnabled`, `RigidBody::setIsAllowedToSleep()`, `setSleepLinearVelocity()` |
+| **Raycast con máscara** | ✅ | `PhysicsWorld::raycast(const Ray&, RaycastCallback*, unsigned short categoryMask)` |
+| **Datos de impacto** | ✅ | `RaycastInfo`: `worldPoint`, `worldNormal`, `hitFraction`, `triangleIndex`, `body`, `collider` |
+| **Interpolación** | ✅ | `Transform::interpolateTransforms(old, new, factor)` |
+| **Memoria propia** | ✅ | `PhysicsCommon(MemoryAllocator* = nullptr)` |
+| **userData opaco** | ✅ | `Body::setUserData(void*)` / `getUserData()` |
+| **Consultas de solapamiento** | ✅ Parcial | `testOverlap(Body*, OverlapCallback&)`, `testOverlap(OverlapCallback&)`, `testCollision(...)` — **contra cuerpo, no contra AABB libre** |
+| **Broad/narrow phase** | ✅ Interno | Dynamic AABB Tree + SAT/GJK, sin API que configurar |
 
-**Consecuencia práctica:** los apartados de *formas*, *joints*, *filtrado*, *triggers*, *sleeping*, *raycast* y *broad/narrow phase* del encargo son **trabajo de integración, no de implementación**. Ahí el coste es escribir nuestra fachada y sus tests, no algoritmos.
+**Consecuencia:** formas, joints, filtrado, triggers, sleeping, raycast y broad/narrow phase son **integración, no implementación**. El coste ahí es la fachada y sus tests, no algoritmos.
 
 ### 3.2 Los 5 huecos, con evidencia
 
-**H1 — No hay Continuous Collision Detection.** Un `grep -rn "continuous"` sobre todos los headers devuelve una única coincidencia, y es un comentario sobre arrays de vértices. rp3d 0.10.2 no implementa CCD. Con timestep de 1/60 s, un cuerpo a 30 m/s avanza 0,5 m por paso: atraviesa cualquier pared más fina que eso.
+**H1 — Sin CCD.** `grep -rn "continuous"` sobre todos los headers devuelve una coincidencia, y es un comentario sobre arrays de vértices. Con `dt = 1/60`, un cuerpo a 30 m/s avanza 0,5 m por paso: atraviesa cualquier pared más fina.
 
-**H2 — El callback de contacto no expone impulso ni fuerza.** `CollisionCallback::ContactPoint` ofrece exactamente cuatro cosas:
+**H2 — El contacto no expone impulso.** `CollisionCallback::ContactPoint` ofrece exactamente:
 
 ```cpp
 decimal        getPenetrationDepth() const;
@@ -119,44 +150,53 @@ const Vector3& getLocalPointOnCollider1() const;
 const Vector3& getLocalPointOnCollider2() const;
 ```
 
-El impulso que calcula el solver es interno y no está en la API pública. El encargo pide "fuerza del impacto" e "impulso aplicado" en **cada** evento: hay que estimarlo (§6.5) o bifurcar la librería (desaconsejado).
+El impulso del solver es interno. El encargo lo pide en **cada** evento: hay que estimarlo (§6.7).
 
-**H3 — No hay Character Controller.** No existe ninguna clase con ese nombre. Se construye entero sobre cuerpo kinemático + raycasts.
+**H3 — Sin Character Controller.** No existe la clase. Se construye entero.
 
-**H4 — No hay vehículos.** Tampoco `RaycastVehicle` (que sí tiene Bullet). Se construye entero.
+**H4 — Sin vehículos.** Tampoco `RaycastVehicle`. Se construye entero.
 
-**H5 — El DebugRenderer cubre 6 de los 13 elementos pedidos.** `DebugRenderer::DebugItem` es exactamente:
+**H5 — El DebugRenderer cubre 6 de 13.** `DebugRenderer::DebugItem` es exactamente `COLLIDER_AABB`, `COLLIDER_BROADPHASE_AABB`, `COLLISION_SHAPE`, `CONTACT_POINT`, `CONTACT_NORMAL`, `COLLISION_SHAPE_NORMAL`. Faltan raycasts, centros de masa, joints y ejes locales.
 
-```cpp
-COLLIDER_AABB, COLLIDER_BROADPHASE_AABB, COLLISION_SHAPE,
-CONTACT_POINT, CONTACT_NORMAL, COLLISION_SHAPE_NORMAL
+### 3.3 Correcciones: cinco suposiciones que el código desmiente
+
+Esta sección existe porque cuatro de las cinco describen **Bullet**, no rp3d. Confundirlos es fácil y caro.
+
+**C1 (sugerencia #47) — `update()` no subdivide internamente.** El cuerpo de `PhysicsWorld::update(decimal timeStep)` en `src/engine/PhysicsWorld.cpp` es una secuencia lineal sin bucle de subpasos:
+
+```
+computeCollisionDetection() → createIslands() → createContacts()
+→ reportContactsAndTriggers() → updateBodiesInverseWorldInertiaTensors()
+→ solver → integración → …
 ```
 
-Cubre bounding boxes, colliders (con sus cápsulas, esferas y mallas), normales, contact points y AABB. **Faltan cuatro:** raycasts, centros de masa, joints y ejes locales — los dibujamos nosotros con raylib (§6.13).
+No hay `maxSubSteps` ni acumulador interno; eso es la firma de Bullet (`stepSimulation(dt, maxSubSteps, fixedDt)`). **Corrección:** el acumulador externo que ya tenemos (ADR-001) es obligatorio, no opcional. Los subpasos para CCD los damos nosotros llamando a `update()` varias veces (§6.17). Y como el broad phase **sí** se recalcula en cada `update()`, subdividir tiene coste real: por eso el subpaso es selectivo, no permanente.
+
+**C2 (#48) — No existe `testAABBOverlap`.** `PhysicsWorld` ofrece `testOverlap(Body*, OverlapCallback&)`, `testOverlap(OverlapCallback&)` y las tres variantes de `testCollision`. Todas parten de un **cuerpo**, no de un AABB suelto. **Corrección:** una consulta "dame todo lo que hay en esta caja" se implementa con un cuerpo-sonda reutilizable (un cuerpo estático con `BoxShape`, marcado como trigger, movido y redimensionado por consulta) o manteniendo nuestro propio índice espacial. La primera opción es la que se planifica (§6.9); tiene coste de mover un cuerpo, no de recorrer el mundo.
+
+**C3 (#10) — Las islas no están expuestas.** `createIslands()` es privado y `RigidBody` no tiene `getIsland()`. **Corrección:** si queremos islas para desactivar zonas lejanas, las calculamos nosotros con *union-find* sobre los pares de contacto que ya recibimos por eventos. Es barato (los pares ya los tenemos) pero es **código nuestro**, no información que rp3d regale (§6.20).
+
+**C4 (#23) — No hay acceso público a los manifolds.** No existe `RigidBody::getContactManifolds()`. Los contactos solo llegan por `EventListener`. **Corrección:** `getContacts(BodyId)` se implementa manteniendo nuestro propio mapa de contactos activos, alimentado por `ContactStart`/`ContactStay`/`ContactExit`. Como `ContactStay` llega **cada frame** mientras dure el contacto, el mapa es exacto sin sondear nada (§6.7).
+
+**C5 (#18) — No hay hook de filtrado pre-narrowphase.** No existe nada parecido a `shouldCollide(a, b)`. **Corrección:** el filtro dinámico se implementa **cambiando la máscara en caliente**, que rp3d sí permite (`setCollideWithMaskBits` es un setter normal). El objetivo de la sugerencia —"atravesar paredes con un power-up"— se cumple igual; lo que no se cumple es hacerlo *sin tocar máscaras*. Un filtro aplicado después del solver no serviría: el rebote ya habría ocurrido.
 
 ---
 
-## 4. ADR-008: decisiones de arquitectura
+## 4. Decisiones de arquitectura (ADR-008 a ADR-013)
 
-Tres decisiones a cerrar antes de escribir código. Se volcarán a `docs/adr/008-*.md`.
+### 4.1 ADR-008 · rp3d sustituye a la física propia (revierte ADR-004)
 
-### 4.1 rp3d sustituye a la física propia (revierte ADR-004)
+[ADR-004](docs/adr/004-fisica-propia-vs-bullet.md) eligió física propia porque "un motor completo es sobredimensionado para un dron con menos de 10 obstáculos". **Ese razonamiento sigue siendo correcto para el juego actual** y deja de serlo para el objetivo del encargo. ADR-008 lo sustituye dejando constancia de que el motivo es la ampliación de alcance, no un defecto de la física propia. ADR-004 se marca *Reemplazado*, no se borra.
 
-[ADR-004](docs/adr/004-fisica-propia-vs-bullet.md) decidió física propia porque "un motor de cuerpos rígidos completo es sobredimensionado para un dron con menos de 10 obstáculos". **Ese razonamiento sigue siendo correcto para el juego actual** y deja de serlo para el objetivo declarado en el encargo (mundo abierto, shooters, simuladores). ADR-008 lo sustituye y deja constancia de que el motivo del cambio es la ampliación de alcance, no un defecto de la física propia.
+### 4.2 ADR-009 · rp3d vive en un módulo `drone_physics`
 
-Nota de coherencia: ADR-004 ya preveía esta salida — *"si el proyecto escala a mundos complejos, migrar es posible: `PhysicsEngine` encapsula toda la física"*. Esa encapsulación es la que hace barata la Fase 1.
+| Opción | Veredicto |
+|---|---|
+| rp3d dentro de `drone_core` | ❌ El core pierde su "cero dependencias"; los tests de lógica pura arrastran 13 MB |
+| Puerto virtual `IPhysicsBackend` | ❌ YAGNI: abstracción para un segundo backend que el encargo **prohíbe** |
+| **Módulo `drone_physics` propio** | ✅ **Elegida** — modular, límite claro, rp3d no se filtra |
 
-### 4.2 Dónde vive rp3d: módulo `drone_physics` propio
-
-Tres opciones evaluadas:
-
-| Opción | Pros | Contras | Veredicto |
-|---|---|---|---|
-| rp3d dentro de `drone_core` | Lo más simple | El core pierde su propiedad de "cero dependencias"; los tests de lógica pura arrastran 13 MB | ❌ |
-| Puerto virtual `IPhysicsBackend` en el core + implementación rp3d aparte | Backend intercambiable, core testeable con un doble | Abstracción sobre una API ya abstracta, para un segundo backend que el encargo **prohíbe** ("exclusivamente ReactPhysics3D") | ❌ YAGNI |
-| **Módulo `drone_physics` propio del que depende el core** | Modular como pide el encargo, límite claro, rp3d no se filtra al resto | Una biblioteca más en el grafo | ✅ **Elegida** |
-
-`drone_physics` es una biblioteca estática con `PhysicsManager` y **ningún header de rp3d en su API pública**: quien la usa ve `BodyId`, `Vec3` y `Transform` propios. Así el core no incluye `reactphysics3d.h` ni una sola vez, y el frontend tampoco.
+`drone_physics` no expone **ningún** header de rp3d en su API pública (pimpl). El core nunca incluye `reactphysics3d.h`, y un guard de CI lo garantiza.
 
 ```
 drone_frontend_raylib ─┐
@@ -164,9 +204,67 @@ drone_frontend_terminal┼→ drone_core → drone_physics → reactphysics3d
 DroneFlightSim ────────┘
 ```
 
-### 4.3 Identificadores opacos en vez de punteros de rp3d
+### 4.3 ADR-010 · Handles opacos sobre un `HandlePool` reutilizable
 
-`PhysicsManager` devuelve `BodyId`/`ColliderId` (índice + generación), nunca `rp3d::RigidBody*`. Es lo que hace posibles dos requisitos del encargo — *"creación y destrucción segura de cuerpos"* y *"object pooling"* — sin punteros colgantes: destruir un cuerpo invalida su generación y cualquier uso posterior del handle falla de forma detectable en vez de corromper memoria.
+`PhysicsManager` devuelve `BodyId`/`ColliderId` (índice + generación), nunca punteros de rp3d. Es lo que hace posibles *"creación y destrucción segura"* y *"object pooling"* sin punteros colgantes.
+
+La estructura no se improvisa dentro del manager: vive en `src/physics/HandlePool.h` como plantilla reutilizable con **tests propios que no dependen de rp3d** (§10.4). Es la pieza más crítica y la más fácil de testear en aislamiento.
+
+### 4.4 ADR-011 · `PhysicsManager` delgado + sistemas especializados
+
+Un manager que simule, consulte, gestione joints, mueva personajes, dibuje debug y perfile acaba en 2.000 líneas intocables. Reparto:
+
+| Módulo | Responsabilidad | Por qué separado |
+|---|---|---|
+| `PhysicsManager` | Mundo, cuerpos, colliders, paso, sincronización | El núcleo, y solo eso |
+| `PhysicsQuerySystem` | Raycasts (3 variantes + lote), overlaps | Las consultas crecen solas; no deben engordar el manager |
+| `JointSystem` | Los 4 joints, límites, motores, fuerzas de reacción | Cada joint tiene parámetros distintos |
+| `CharacterController` | Movimiento de personaje | Es un simulador aparte que *usa* la física |
+| `VehicleSystem` | Chasis + ruedas por raycast | Ídem |
+| `PhysicsProfiler` | Contadores y tiempos | Debe poder desactivarse entero |
+| `PhysicsRewindSystem` | Grabar y reproducir | Solo en debug/tests |
+| `PhysicsLODSystem` | Degradar simulación por distancia | Política, no mecánica |
+| `IPhysicsDebugger` | Visualización | **Interfaz**, no acoplada al manager |
+
+**`IPhysicsDebugger` es interfaz, no un getter.** En v1.0 el manager exponía `const DebugGeometry&`. Ahora el manager **publica** geometría de debug a suscriptores:
+
+```cpp
+class IPhysicsDebugger {
+public:
+    virtual ~IPhysicsDebugger() = default;
+    virtual void beginFrame() = 0;
+    virtual void line(const Vec3& a, const Vec3& b, uint32_t rgba) = 0;
+    virtual void triangle(const Vec3& a, const Vec3& b, const Vec3& c, uint32_t rgba) = 0;
+    virtual void endFrame() = 0;
+};
+void PhysicsManager::addDebugger(IPhysicsDebugger*);   // varios a la vez
+```
+
+Así conviven un dibujante de raylib, un volcado a fichero para tests y ninguno (coste cero) sin tocar el manager.
+
+### 4.5 ADR-012 · Capas numéricas + matriz de colisión, sobre las máscaras
+
+Las máscaras de 16 bits son potentes y **ilegibles**: `category = 0x0004, mask = 0xFFFB` no le dice nada a nadie. Encima de ellas, una capa numérica por collider y una matriz declarativa:
+
+```toml
+[physics.layers]
+names = ["default", "drone", "edificio", "proyectil", "trigger", "personaje"]
+
+[[physics.collision_matrix]]
+layer_a = "proyectil"
+layer_b = "drone"
+collide = false          # los proyectiles no golpean al que dispara
+```
+
+`LayerRegistry` compila esa matriz a los `categoryBits`/`maskBits` de rp3d al arrancar y **valida que sea simétrica** (si A no colisiona con B, B no colisiona con A — una asimetría es siempre un error de configuración, y sin validación produce colisiones que ocurren "a veces"). Límite heredado de rp3d: **máximo 16 capas**, porque las máscaras son `unsigned short`. Se comprueba al cargar.
+
+### 4.6 ADR-013 · ECS con archetypes
+
+Un archetype (combinación fija de componentes) permite recorrer las entidades con `(Transform, Rigidbody)` sin tocar las que solo tienen `Transform`, con memoria contigua.
+
+**Coste honesto:** los cambios estructurales (añadir o quitar un componente) obligan a mover la entidad de archetype. Para físicas es poco frecuente —un cuerpo rara vez deja de tener `Rigidbody`— así que el coste es bajo y la ganancia en caché, alta. Se acepta.
+
+**Límite de alcance:** archetypes sí; sistema de scheduling, dependencias entre sistemas y paralelismo, no. Eso es un motor ECS completo y no lo pide nadie todavía.
 
 ---
 
@@ -174,218 +272,295 @@ DroneFlightSim ────────┘
 
 ```mermaid
 graph TB
-    subgraph app["src/app — composición"]
-        MAIN["main.cpp"]
+    subgraph app["src/app"]
+        MAIN["main.cpp — composición"]
     end
-    subgraph fe["src/frontend — presentación"]
-        RAY["RaylibRenderer<br/>+ DebugDraw"]
+    subgraph fe["src/frontend"]
+        RAY["RaylibRenderer"]
+        DBG["RaylibPhysicsDebugger<br/>(implementa IPhysicsDebugger)"]
         TERM["TerminalRenderer"]
     end
     subgraph core["src/core — drone_core (sin I/O)"]
-        GC["GameController<br/>máquina de estados + bucle fijo"]
-        W["World / Escena ECS"]
-        ECS["Componentes:<br/>Transform · Rigidbody<br/>Collider · PhysicsMaterial"]
+        GC["GameController"]
+        SC["Scene / ECS con archetypes"]
+        HIER["TransformHierarchy"]
         EVT["EventBus tipado"]
-        PROG["PlayerProgression"]
     end
     subgraph phys["src/physics — drone_physics (NUEVO)"]
-        PM["PhysicsManager<br/>PhysicsCommon · PhysicsWorld<br/>handles · fixed step · sync"]
-        BOD["Bodies & Colliders"]
-        MAT["Materiales"]
-        RC["Raycasting"]
-        JT["Joints"]
-        CH["CharacterController"]
-        VH["VehicleBase"]
-        DBG["DebugGeometry<br/>(buffer de líneas)"]
+        PIPE["PhysicsPipeline<br/>pre-step · step · post-step · sync"]
+        PM["PhysicsManager<br/>mundo · cuerpos · colliders"]
+        HP["HandlePool"]
+        QS["PhysicsQuerySystem"]
+        JS["JointSystem"]
+        CC["CharacterController"]
+        VS["VehicleSystem"]
+        CB["ContactBridge"]
+        TB["TriggerBridge"]
+        PROF["PhysicsProfiler"]
+        LOD["PhysicsLODSystem"]
+        RW["PhysicsRewindSystem"]
+        ISL["IslandTracker"]
+        AP["IAssetProvider"]
     end
     RP3D["reactphysics3d 0.10.2"]
 
-    MAIN --> GC
-    MAIN --> RAY & TERM
-    GC --> W --> ECS
-    W --> PM
-    W --> EVT
-    PM --> BOD & MAT & RC & JT & CH & VH & DBG
+    MAIN --> GC & RAY & TERM & DBG
+    GC --> SC --> HIER
+    SC --> PIPE
+    PIPE --> PM & QS & JS & CC & VS & LOD & RW & ISL
+    PM --> HP & AP
+    PM --> CB & TB
+    CB & TB --> EVT
+    PM --> PROF
     PM --> RP3D
-    RAY -. "lee WorldState + DebugGeometry" .-> W
-    TERM -. "lee WorldState" .-> W
+    PM -. "IPhysicsDebugger" .-> DBG
 
     style phys fill:#1a472a,color:#fff
     style core fill:#1a3a5c,color:#fff
     style RP3D fill:#3a3a1a,color:#fff
 ```
 
-**Regla que la CI debe vigilar (guard nuevo):** ningún fichero fuera de `src/physics/` puede incluir `reactphysics3d`. Un `grep` en el job de lint, igual que el guard de I/O que ya existe.
+**Guard de CI nuevo:** ningún fichero fuera de `src/physics/` puede incluir `reactphysics3d`, igual que el guard de I/O que ya existe.
 
-### 5.1 Flujo de un frame
+### 5.1 `PhysicsPipeline`: fases explícitas y ganchos
+
+El `fixedStep` monolítico de v1.0 se convierte en un pipeline con puntos de extensión, para que un sistema de gameplay pueda inyectar lógica "justo antes del solver" sin tocar el manager:
+
+```cpp
+enum class PhysicsPhase { PreStep, PostStep, PostSync };
+
+class PhysicsPipeline {
+public:
+    using Hook = std::function<void(float dt)>;
+    void addHook(PhysicsPhase phase, Hook hook);
+    void step(float dt);
+};
+
+void PhysicsPipeline::step(float dt) {
+    m_profiler.begin(Stage::PreStep);
+    runHooks(PhysicsPhase::PreStep, dt);   // fuerzas, gravedad por zona, LOD, CCD previo
+    m_manager.captureTransforms();          // solo cuerpos despiertos
+    m_profiler.end(Stage::PreStep);
+
+    m_profiler.begin(Stage::Solver);
+    m_manager.stepWorld(dt);                // rp3d: 1 update (o N si hay subpasos)
+    m_profiler.end(Stage::Solver);
+
+    m_profiler.begin(Stage::PostStep);
+    runHooks(PhysicsPhase::PostStep, dt);   // el mundo ya avanzó, aún no se publicó
+    m_manager.flushPendingDestructions();   // destruir aquí, nunca en el callback
+    m_bridges.dispatchQueuedEvents();       // eventos al EventBus
+    m_profiler.end(Stage::PostStep);
+
+    m_profiler.begin(Stage::Sync);
+    m_manager.syncTransforms(m_scene);      // solo cuerpos activos → ECS
+    runHooks(PhysicsPhase::PostSync, dt);
+    m_profiler.end(Stage::Sync);
+}
+```
+
+Ejemplo real del encargo: un power-up que duplica la gravedad durante un frame es un hook de `PreStep`, no una modificación del manager.
+
+### 5.2 Flujo de un frame
 
 ```mermaid
 sequenceDiagram
     participant GC as GameController
-    participant W as World/ECS
+    participant PIPE as PhysicsPipeline
     participant PM as PhysicsManager
-    participant RP as rp3d PhysicsWorld
+    participant RP as rp3d
+    participant BR as Contact/TriggerBridge
     participant EB as EventBus
     participant R as IRenderer
 
     GC->>GC: acumulador += min(frameTime, maxFrameTime)
     loop mientras acumulador >= 1/60
-        GC->>W: fixedUpdate(dt)
-        W->>PM: applyForces (empuje, viento) sobre cuerpos
-        PM->>PM: guarda transform previo de cada cuerpo activo
-        PM->>RP: world->update(dt)
-        RP-->>PM: onContact / onTrigger (EventListener)
-        PM->>EB: CollisionEnter/Stay/Exit + Trigger*
-        PM->>W: sincroniza TransformComponent de cuerpos activos
+        GC->>PIPE: step(1/60)
+        PIPE->>PIPE: hooks PreStep (fuerzas, gravedad local, CCD)
+        PIPE->>PM: captureTransforms (cuerpos despiertos)
+        PM->>RP: update(dt) — 1 paso, o N si el cuerpo pide subpasos
+        RP-->>BR: onContact / onTrigger (ENCOLAN, no actúan)
+        PIPE->>PM: flushPendingDestructions
+        PIPE->>EB: despacha eventos encolados
+        PIPE->>PM: syncTransforms → ECS (solo activos)
         GC->>GC: acumulador -= 1/60
     end
-    GC->>PM: interpolated(id, alpha) por cuerpo visible
-    GC->>R: draw(WorldState, alpha)
+    GC->>PM: interpolated(id, alpha)
+    GC->>R: draw(escena, alpha)
 ```
 
-El bucle de timestep fijo **ya existe y no cambia** (ADR-001): rp3d se acopla dentro del `while (acumulador >= dt)` que hoy llama a `World::step`.
+El bucle de timestep fijo **ya existe y no cambia** (ADR-001).
 
 ---
 
 ## 6. Diseño técnico por subsistema
 
-Código de referencia: firmas reales que se implementarán, no pseudocódigo.
+### 6.1 `PhysicsSettings` ↔ TOML
 
-### 6.1 PhysicsManager y handles
+Todos los campos de `rp3d::WorldSettings`, mapeados explícitamente. Los valores son los **defaults reales verificados** en el header:
+
+```toml
+[physics.world]
+gravity                          = [0.0, -9.81, 0.0]
+persistent_contact_distance      = 0.03    # rp3d default
+default_friction_coefficient     = 0.3
+default_bounciness               = 0.5
+restitution_velocity_threshold   = 0.5     # por debajo, no rebota
+velocity_solver_iterations       = 6
+position_solver_iterations       = 3
+cos_angle_similar_contact_manifold = 0.95
+
+[physics.sleeping]
+enabled                 = true
+time_before_sleep       = 1.0     # s
+sleep_linear_velocity   = 0.02    # m/s
+sleep_angular_velocity  = 0.0523  # rad/s ≈ 3°/s
+
+[physics.step]
+fixed_timestep   = 0.0166667
+max_frame_time   = 0.25
+max_sub_steps    = 4        # tope global de subpasos por frame (§6.17)
+
+[physics.debug]
+enabled = false
+items   = ["collision_shape", "contact_point", "raycasts", "center_of_mass"]
+```
+
+`validateConfig` —que ya existe con rangos y avisos— se extiende a estos campos. **Regla:** ninguna constante física en código; si un valor merece existir, merece estar en el TOML.
+
+### 6.2 `HandlePool`
 
 ```cpp
-// src/physics/PhysicsTypes.h — API pública SIN headers de rp3d
-namespace drone::physics {
+// src/physics/HandlePool.h — sin dependencias, testeable en aislamiento
+template <typename T>
+class HandlePool {
+public:
+    struct Handle { uint32_t index = 0; uint32_t generation = 0; };
 
-struct BodyId { uint32_t index = 0; uint32_t generation = 0;
-                bool valid() const { return generation != 0; } };
-struct ColliderId { uint32_t index = 0; uint32_t generation = 0; };
+    Handle create(T value);
+    bool valid(Handle h) const;      // generación coincide
+    T* get(Handle h);                // nullptr si inválido — nunca UB
+    void destroy(Handle h);          // incrementa generación y encola el índice
+    size_t aliveCount() const;
 
-enum class BodyType { Static, Dynamic, Kinematic };
+private:
+    std::vector<T> m_items;
+    std::vector<uint32_t> m_generations;
+    std::vector<uint32_t> m_freeList;   // reutilización de índices = pooling
+};
+```
+
+Un handle liberado y reusado incrementa su generación, así que un `BodyId` viejo **no** apunta al cuerpo nuevo. Es la diferencia entre un bug detectable y una corrupción silenciosa.
+
+### 6.3 API pública de `PhysicsManager`
+
+```cpp
+// src/physics/PhysicsTypes.h — SIN headers de rp3d
+struct BodyId     { uint32_t index = 0, generation = 0; bool valid() const { return generation != 0; } };
+struct ColliderId { uint32_t index = 0, generation = 0; };
+
+enum class BodyType  { Static, Dynamic, Kinematic };
 enum class ShapeType { Box, Sphere, Capsule, ConvexMesh, ConcaveMesh, HeightField };
 
-struct MaterialDesc {           // §6.4
-    float density   = 1.0f;
-    float friction  = 0.3f;
-    float bounciness = 0.1f;    // restitución
-};
+struct MaterialDesc { float density = 1.0f, friction = 0.3f, bounciness = 0.1f; };
 
 struct ShapeDesc {
     ShapeType type = ShapeType::Box;
-    Vec3 halfExtents{0.5f, 0.5f, 0.5f};  // Box
-    float radius = 0.5f;                  // Sphere / Capsule
-    float height = 1.0f;                  // Capsule
-    MeshId mesh;                          // Convex/Concave/HeightField
-    Transform localOffset;                // múltiples colliders por cuerpo
+    Vec3  halfExtents{0.5f, 0.5f, 0.5f};   // Box
+    float radius = 0.5f, height = 1.0f;    // Sphere / Capsule
+    AssetId mesh;                          // Convex/Concave/HeightField (§6.14)
+    Transform localOffset;                 // varios colliders por cuerpo
     MaterialDesc material;
-    uint16_t category = 0x0001;
-    uint16_t mask     = 0xFFFF;
+    LayerId layer = LayerId::Default;      // §4.5 — no bits a mano
     bool isTrigger = false;
+    bool autoUpdateMass = true;            // §6.5
 };
 
 struct BodyDesc {
     BodyType type = BodyType::Dynamic;
     Transform transform;
-    bool allowSleep = true;
-    bool gravityEnabled = true;
-    float linearDamping = 0.0f;
-    float angularDamping = 0.0f;
+    BodyId parent;                  // jerarquía opcional (§6.13)
+    uint64_t userData = 0;          // EntityId del juego (§6.5)
+    bool allowSleep = true, gravityEnabled = true;
+    float linearDamping = 0.0f, angularDamping = 0.0f;
+    uint8_t maxSubSteps = 1;        // CCD por cuerpo (§6.17)
 };
-
-}  // namespace drone::physics
 ```
 
 ```cpp
-// src/physics/PhysicsManager.h
 class PhysicsManager {
 public:
-    explicit PhysicsManager(const PhysicsSettings& settings);
+    explicit PhysicsManager(const PhysicsSettings&, IAssetProvider&);
     ~PhysicsManager();
-    PhysicsManager(const PhysicsManager&) = delete;
 
-    // --- ciclo de vida de cuerpos (seguro: handles con generación) ---
-    BodyId createBody(const BodyDesc& desc);
-    void destroyBody(BodyId id);                 // difiere al final del paso
-    bool isValid(BodyId id) const;
-    ColliderId addCollider(BodyId body, const ShapeDesc& shape);
-    void removeCollider(ColliderId id);
+    // Ciclo de vida
+    BodyId createBody(const BodyDesc&);
+    void createBodies(std::span<const BodyDesc>, std::span<BodyId> out);  // lote (§6.5)
+    void destroyBody(BodyId);                    // diferida hasta PostStep
+    bool isValid(BodyId) const;
+    ColliderId addCollider(BodyId, const ShapeDesc&);
+    void removeCollider(ColliderId);
 
-    // --- simulación ---
-    void fixedStep(float dt);                    // §6.2
-    Transform interpolated(BodyId id, float alpha) const;
-    Transform transform(BodyId id) const;
+    // Simulación (la llama el pipeline, no el juego)
+    void captureTransforms();
+    void stepWorld(float dt);
+    void syncTransforms(Scene&);
+    Transform interpolated(BodyId, float alpha) const;
 
-    // --- fuerzas y estado ---
-    void applyForce(BodyId id, const Vec3& force);
-    void applyTorque(BodyId id, const Vec3& torque);
-    void setLinearVelocity(BodyId id, const Vec3& v);
-    Vec3 linearVelocity(BodyId id) const;
-    void setActive(BodyId id, bool active);      // activación dinámica
+    // Estado
+    void applyForce(BodyId, const Vec3&);
+    void applyTorque(BodyId, const Vec3&);
+    void setLinearVelocity(BodyId, const Vec3&);
+    void setActive(BodyId, bool);
+    void setLayer(ColliderId, LayerId);          // filtro dinámico (§6.8)
+    uint64_t userData(BodyId) const;
 
-    // --- consultas y eventos ---
-    RaycastHit raycastClosest(const Ray& ray, const RaycastFilter& f) const;   // §6.6
-    bool raycast(const Ray& ray, const RaycastFilter& f) const;
-    void raycastAll(const Ray& ray, const RaycastFilter& f,
-                    std::vector<RaycastHit>& out) const;
-    void setContactSink(ContactSink* sink);      // §6.5
+    // Contactos activos (§6.7)
+    std::span<const ContactPointInfo> contacts(BodyId) const;
 
-    // --- depuración ---
-    void setDebugEnabled(bool on);
-    const DebugGeometry& debugGeometry() const;  // §6.13
+    // Depuración
+    void addDebugger(IPhysicsDebugger*);
+    const PhysicsProfiler& profiler() const;
 
 private:
-    struct Impl;                    // esconde rp3d por completo (pimpl)
+    struct Impl;                     // pimpl: rp3d no sale de aquí
     std::unique_ptr<Impl> m_impl;
 };
 ```
 
-El *pimpl* no es adorno: es lo que garantiza que `reactphysics3d.h` no aparezca en ningún header del proyecto y que el guard de CI de §5 pueda ser tajante.
-
-### 6.2 Fixed step, sincronización e interpolación
-
-rp3d ofrece `Transform::interpolateTransforms`, que encaja exactamente con el acumulador que ya tenemos:
+### 6.4 Paso fijo, subpasos e interpolación
 
 ```cpp
-void PhysicsManager::Impl::fixedStep(float dt) {
-    // 1. Guardar el transform previo SOLO de los cuerpos despiertos:
-    //    el requisito de "actualizar únicamente cuerpos activos" empieza aquí.
-    for (BodyRecord& b : activeBodies()) {
+void PhysicsManager::Impl::captureTransforms() {
+    // Solo cuerpos despiertos: aquí empieza "actualizar únicamente activos".
+    for (BodyRecord& b : awakeBodies) {
         b.previousTransform = b.body->getTransform();
+        b.previousVelocity  = b.body->getLinearVelocity();   // para estimar impulso
     }
+}
 
-    // 2. Un único paso de tamaño fijo — determinismo (ADR-001).
-    world->update(dt);
-
-    // 3. Procesar destrucciones diferidas: destruir dentro del callback de
-    //    contacto corrompería el estado interno del solver.
-    flushPendingDestructions();
+void PhysicsManager::Impl::stepWorld(float dt) {
+    // rp3d NO subdivide internamente (§3.3 C1): los subpasos son nuestros.
+    const int n = requiredSubSteps();       // 1 salvo que haya cuerpos rápidos con CCD
+    const float sub = dt / static_cast<float>(n);
+    for (int i = 0; i < n; ++i) world->update(sub);
 }
 
 Transform PhysicsManager::Impl::interpolated(BodyId id, float alpha) const {
     const BodyRecord& b = get(id);
-    if (b.isSleeping) return fromRp3d(b.body->getTransform());   // sin coste
+    if (b.isSleeping) return fromRp3d(b.body->getTransform());   // dormido: sin coste
     return fromRp3d(rp3d::Transform::interpolateTransforms(
         b.previousTransform, b.body->getTransform(), alpha));
 }
 ```
 
-**Determinismo:** con el mismo binario y el mismo orden de creación de cuerpos, rp3d es reproducible. **No lo es entre plataformas ni entre niveles de optimización** (reordenación de operaciones en coma flotante). Ver el impacto sobre los tests en §7.
+**Determinismo:** reproducible con el mismo binario y el mismo orden de creación de cuerpos; **no** entre plataformas ni entre niveles de optimización. Ver §10.3.
 
-### 6.3 Cuerpos y formas
+### 6.5 Cuerpos, formas y sus tres trampas
 
 ```cpp
-BodyId PhysicsManager::Impl::createBody(const BodyDesc& d) {
-    rp3d::RigidBody* body = world->createRigidBody(toRp3d(d.transform));
-    body->setType(toRp3dType(d.type));           // STATIC / KINEMATIC / DYNAMIC
-    body->setIsAllowedToSleep(d.allowSleep);
-    body->enableGravity(d.gravityEnabled);
-    body->setLinearDamping(d.linearDamping);
-    body->setAngularDamping(d.angularDamping);
-    return registry.add(body);                   // asigna índice + generación
-}
-
 ColliderId PhysicsManager::Impl::addCollider(BodyId id, const ShapeDesc& s) {
-    rp3d::CollisionShape* shape = createShape(s);   // las 6 formas, cacheadas
+    rp3d::CollisionShape* shape = m_shapeCache.acquire(s);   // ver ShapeKey abajo
     rp3d::Collider* col = get(id).body->addCollider(shape, toRp3d(s.localOffset));
 
     rp3d::Material& m = col->getMaterial();
@@ -393,427 +568,754 @@ ColliderId PhysicsManager::Impl::addCollider(BodyId id, const ShapeDesc& s) {
     m.setFrictionCoefficient(s.material.friction);
     m.setBounciness(s.material.bounciness);
 
-    col->setCollisionCategoryBits(s.category);
-    col->setCollideWithMaskBits(s.mask);
+    const LayerBits bits = m_layers.bitsFor(s.layer);        // §4.5
+    col->setCollisionCategoryBits(bits.category);
+    col->setCollideWithMaskBits(bits.mask);
     col->setIsTrigger(s.isTrigger);
 
-    // Con múltiples colliders hay que recalcular masa/inercia tras cada alta.
-    get(id).body->updateMassPropertiesFromColliders();
-    return colliderRegistry.add(col);
+    if (s.autoUpdateMass) get(id).body->updateMassPropertiesFromColliders();
+    return m_colliders.create(col);
 }
 ```
 
-**Reutilización de formas (requisito "reutilización de colliders"):** las formas de rp3d se crean desde `PhysicsCommon` y **pueden compartirse entre colliders**. `createShape` cachea por descriptor (`unordered_map<ShapeKey, CollisionShape*>`): 500 cajas idénticas comparten una `BoxShape`.
+**Trampa 1 — la clave de caché de formas.** Cachear por `ShapeDesc` con floats es frágil: dos radios que difieren en 1e-7 son claves distintas y duplican la forma. La clave se **cuantiza**:
 
-**Masa vs densidad:** rp3d deriva la masa de densidad × volumen al llamar a `updateMassPropertiesFromColliders()`. Si el juego quiere fijar masa directamente (el dron pesa 1,2 kg por configuración), se usa `body->setMass()` **después** de esa llamada, o el volumen del collider la sobrescribe. Es un orden que se olvida y produce drones de 40 kg.
+```cpp
+struct ShapeKey {
+    ShapeType type;
+    int32_t qx, qy, qz;     // dimensiones en milímetros (redondeadas)
+    AssetId  mesh;          // para mallas, el id del asset manda: sin cuantizar nada
+    bool operator==(const ShapeKey&) const = default;
+};
+inline int32_t quantize(float meters) { return static_cast<int32_t>(std::lround(meters * 1000.0f)); }
+```
 
-### 6.4 Materiales físicos
+**Trampa 2 — masa vs densidad.** rp3d deriva la masa de densidad × volumen en `updateMassPropertiesFromColliders()`. Fijar `setMass()` **antes** de esa llamada no sirve: la sobreescribe. Por eso `autoUpdateMass` es un flag explícito y quien quiera masa fija la aplica después. Es el bug del "dron de 40 kg".
 
-El encargo pide 8 propiedades por collider. Reparto real:
+**Trampa 3 — el mapa BodyId↔Entidad.** Un `std::unordered_map<BodyId, EntityId>` consultado en cada callback de contacto es una indirección en el camino caliente. Se elimina con el `userData` que rp3d ya ofrece:
+
+```cpp
+body->setUserData(reinterpret_cast<void*>(static_cast<uintptr_t>(entityId)));
+// en el callback: EntityId e = static_cast<EntityId>(reinterpret_cast<uintptr_t>(body->getUserData()));
+```
+
+**Creación en lote.** Cargar 200 edificios uno a uno dispara 200 inserciones en el broad phase. `createBodies(std::span<const BodyDesc>, std::span<BodyId>)` los crea agrupados y **añade todos los colliders antes de la primera llamada a `update()`**, que es cuando el árbol AABB se reequilibra de una vez.
+
+### 6.6 Materiales
 
 | Propiedad | Dónde vive | API |
 |---|---|---|
-| Fricción | Collider | `Material::setFrictionCoefficient` |
-| Restitución | Collider | `Material::setBounciness` |
-| Densidad | Collider | `Material::setMassDensity` |
-| Masa | **Cuerpo** | `RigidBody::setMass` (tras `updateMassPropertiesFromColliders`) |
-| Centro de masa | **Cuerpo** | `RigidBody::setLocalCenterOfMass` |
-| Inercia | **Cuerpo** | `RigidBody::setLocalInertiaTensor` |
+| Fricción · Restitución · Densidad | **Collider** | `Material::setFrictionCoefficient` / `setBounciness` / `setMassDensity` |
+| Masa · Centro de masa · Inercia | **Cuerpo** | `RigidBody::setMass` / `setLocalCenterOfMass` / `setLocalInertiaTensor` |
 | Sleeping | Cuerpo + mundo | `setIsAllowedToSleep` + `WorldSettings::isSleepingEnabled` |
-| Activación dinámica | Cuerpo | `RigidBody::setIsActive` |
+| Activación | Cuerpo | `RigidBody::setIsActive` |
 
-Es decir: **masa, centro de masa e inercia son propiedades del cuerpo, no del collider**. `PhysicsMaterialComponent` (§6.11) expone las tres primeras por collider y las otras por cuerpo, en vez de fingir que todas son lo mismo.
+`PhysicsMaterialComponent` respeta ese reparto en vez de fingir que las ocho son lo mismo.
 
-### 6.5 Sistema de eventos — y el hueco del impulso (H2)
+### 6.7 Eventos: dos puentes, no uno
+
+Colisiones y triggers comparten la clase base `rp3d::EventListener` pero **no comparten política**: un trigger no estima impulso, no frena a nadie y no debería pasar por el mismo filtrado. Un solo puente con `if (isTrigger)` repartido por el callback envejece mal.
 
 ```cpp
-// src/physics/ContactBridge.h — traduce rp3d → eventos del juego
 class ContactBridge final : public rp3d::EventListener {
-public:
-    void onContact(const rp3d::CollisionCallback::CallbackData& data) override;
-    void onTrigger(const rp3d::OverlapCallback::CallbackData& data) override;
+    void onContact(const rp3d::CollisionCallback::CallbackData&) override;  // encola
+    void onTrigger(const rp3d::OverlapCallback::CallbackData&) override {}  // delega
+};
+class TriggerBridge {          // lo llama ContactBridge::onTrigger
+    void process(const rp3d::OverlapCallback::CallbackData&);
 };
 ```
 
-Mapeo directo, sin invención:
-
 | Evento del encargo | Origen en rp3d |
 |---|---|
-| `OnCollisionEnter` | `ContactPair::EventType::ContactStart` |
-| `OnCollisionStay` | `ContactStay` |
-| `OnCollisionExit` | `ContactExit` |
-| `OnTriggerEnter` | `OverlapPair::EventType::OverlapStart` |
-| `OnTriggerStay` | `OverlapStay` |
-| `OnTriggerExit` | `OverlapExit` |
-
-Carga útil del evento:
+| `OnCollisionEnter` / `Stay` / `Exit` | `ContactStart` / `ContactStay` / `ContactExit` |
+| `OnTriggerEnter` / `Stay` / `Exit` | `OverlapStart` / `OverlapStay` / `OverlapExit` |
 
 ```cpp
 struct ContactEvent {
     EntityId a, b;
-    Vec3 point;          // world = collider1->getLocalToWorldTransform() * localPoint1
-    Vec3 normal;         // getWorldNormal()
-    float penetration;   // getPenetrationDepth()
-    float impulse;       // ESTIMADO — ver abajo
-    float force;         // impulse / dt
+    Vec3 point, normal;
+    float penetration;
+    float impulse;   // ESTIMADO — §3.2 H2
+    float force;     // impulse / dt
 };
 ```
 
-**El hueco (H2) y cómo se cubre.** El impulso real lo calcula el solver y no está en la API pública. Se estima con la velocidad relativa **antes** del paso, que sí conocemos porque `fixedStep` ya guarda el estado previo:
+**El impulso estimado (H2).** El solver no lo publica. Se calcula con la velocidad relativa **antes** del paso, que `captureTransforms` ya guardó:
 
 ```cpp
-// Impulso normal de una colisión inelástica entre dos cuerpos:
-//   j = (1 + e) · |v_rel · n| · m_efectiva,  con m_ef = (mA·mB)/(mA+mB)
-// Para un cuerpo contra estático, m_ef = mA.
+// j = (1 + e) · |v_rel · n| · m_ef,  con m_ef = (mA·mB)/(mA+mB); m_ef = mA contra estático.
 float estimateImpulse(const BodyRecord& a, const BodyRecord& b, const Vec3& n) {
     const float vRel = std::fabs(dot(a.previousVelocity - b.previousVelocity, n));
-    const float mEff = (b.isStatic) ? a.mass
-                                    : (a.mass * b.mass) / (a.mass + b.mass);
+    const float mEff = b.isStatic ? a.mass : (a.mass * b.mass) / (a.mass + b.mass);
     return (1.0f + restitutionBetween(a, b)) * vRel * mEff;
 }
 ```
 
-Esto **no es el impulso del solver**: ignora la fricción, el reparto entre múltiples puntos de contacto y las iteraciones del solver. Para lo que el juego necesita —decidir si un impacto es fatal, escalar un sonido, disparar partículas— es suficiente y es exactamente lo que ya hace hoy `PhysicsEngine::resolveGround` con la velocidad de impacto. Se documentará como estimación en la API (`float impulse;  // estimado, ver grafico.md §6.5`) para que nadie lo use como si fuera exacto. La alternativa —bifurcar rp3d para exponer `mPenetrationImpulse`— nos ataría a un fork y se descarta.
+Ignora fricción, reparto entre puntos de contacto e iteraciones del solver. Para decidir si un impacto es fatal, escalar un sonido o lanzar partículas es suficiente — y es exactamente lo que ya hace hoy `PhysicsEngine::resolveGround`. Se documenta como estimación **en el propio campo** para que nadie lo tome por exacto.
 
-**Regla dura:** los callbacks de rp3d se invocan **durante** `world->update()`. Está prohibido crear o destruir cuerpos dentro de ellos. `ContactBridge` solo encola eventos; el `EventBus` los despacha después del paso, y las destrucciones pasan por la cola diferida de §6.2.
-
-### 6.6 Raycasting
-
-Las tres variantes del encargo se apoyan en el valor de retorno de `notifyRaycastHit`, que controla cómo continúa el rayo:
+**Contactos activos (`getContacts`, corrección C4).** rp3d no expone los manifolds, así que el puente mantiene el mapa:
 
 ```cpp
-class ClosestHitCallback final : public rp3d::RaycastCallback {
+// ContactStart → insertar · ContactStay → actualizar · ContactExit → borrar
+std::unordered_map<BodyId, std::vector<ContactPointInfo>> m_activeContacts;
+```
+
+Como `ContactStay` llega **cada frame** mientras el contacto dure, el mapa está siempre al día sin sondear nada. Esto es lo que habilita el daño por contacto continuo, que con solo eventos de cambio de estado no se puede hacer.
+
+**Regla dura:** los callbacks se invocan **dentro** de `world->update()`. Prohibido crear o destruir cuerpos ahí. Los puentes solo encolan; el pipeline despacha en `PostStep`.
+
+### 6.8 Filtrado: capas, matriz y filtro dinámico
+
+Tres niveles, del más declarativo al más dinámico:
+
+1. **Capas + matriz TOML** (§4.5): la configuración normal, legible y validada al cargar.
+2. **Máscaras de bits**: lo que `LayerRegistry` genera; nadie las escribe a mano.
+3. **Filtro dinámico** (corrección C5): rp3d no tiene hook pre-narrowphase, así que un cambio temporal de reglas se hace **cambiando la máscara en caliente**:
+
+```cpp
+// Power-up "atravesar paredes": quitar la capa "edificio" de la máscara del dron.
+void ContactFilter::setPassThrough(BodyId body, LayerId layer, bool passThrough);
+```
+
+Es una escritura por collider afectado, no una consulta por par de cuerpos y por frame: **más barato** que el hook que la sugerencia imaginaba. Lo que no permite es decidir caso por caso en función de estado arbitrario del juego; si algún día hiciera falta, la vía es marcar el collider como trigger y resolver la respuesta a mano.
+
+### 6.9 `PhysicsQuerySystem`: raycasts y solapamientos
+
+```cpp
+class PhysicsQuerySystem {
 public:
-    rp3d::decimal notifyRaycastHit(const rp3d::RaycastInfo& info) override {
-        if (m_filter.ignores(info.body)) return rp3d::decimal(1.0);  // seguir
-        m_hit = toHit(info);
-        return info.hitFraction;   // recorta el rayo: solo llegarán impactos más cercanos
-    }
-};
+    RaycastHit closest(const Ray&, const QueryFilter&) const;
+    bool any(const Ray&, const QueryFilter&) const;
+    void all(const Ray&, const QueryFilter&, std::vector<RaycastHit>& out) const;
 
-class AllHitsCallback final : public rp3d::RaycastCallback {
-    rp3d::decimal notifyRaycastHit(const rp3d::RaycastInfo& info) override {
-        if (!m_filter.ignores(info.body)) m_hits.push_back(toHit(info));
-        return rp3d::decimal(1.0);  // seguir hasta el final
-    }
-};
+    // Lote: un solo recorrido de preparación para N rayos (§6.11)
+    void batch(std::span<const Ray>, const QueryFilter&, std::span<RaycastHit> out) const;
 
-class AnyHitCallback final : public rp3d::RaycastCallback {
-    rp3d::decimal notifyRaycastHit(const rp3d::RaycastInfo& info) override {
-        if (m_filter.ignores(info.body)) return rp3d::decimal(1.0);
-        m_hit = true;
-        return rp3d::decimal(0.0);  // 0 = parar de inmediato (el más barato)
-    }
+    // Solapamiento — corrección C2: rp3d no tiene testAABBOverlap
+    void overlapBox(const Vec3& center, const Vec3& halfExtents,
+                    const QueryFilter&, std::vector<BodyId>& out) const;
+    void overlapSphere(const Vec3& center, float radius,
+                       const QueryFilter&, std::vector<BodyId>& out) const;
 };
 ```
 
-| Variante | Retorno | Coste |
+Las tres variantes de raycast salen del valor de retorno de `notifyRaycastHit`:
+
+| Variante | Retorno | Efecto |
 |---|---|---|
-| `raycastClosest` | `hitFraction` | Recorre el árbol recortando |
-| `raycastAll` | `1.0` | Recorre todo |
-| `raycast` (any) | `0.0` | Para en el primero — para tests de visibilidad |
+| `closest` | `info.hitFraction` | Recorta el rayo: solo llegan impactos más cercanos |
+| `all` | `1.0` | Recorre todo |
+| `any` | `0.0` | Para en el primero — el más barato, para visibilidad |
 
-El **filtrado por máscara** va en la llamada (`world->raycast(ray, &cb, categoryMask)`); **ignorar entidades concretas** no lo soporta rp3d y se resuelve en el callback (`m_filter.ignores`), que es donde ya tenemos el `Body*`.
+**Overlap sin `testAABBOverlap`:** se mantiene un **cuerpo-sonda** reutilizable (estático, trigger, con `BoxShape` y `SphereShape`) que se mueve y redimensiona por consulta y se pasa a `testOverlap(probe, callback)`. Coste: mover un cuerpo, no recorrer el mundo. El cuerpo-sonda se crea una vez y vive con el sistema — object pooling aplicado donde de verdad se nota.
 
-### 6.7 Joints
+**Lote de rayos:** el `QueryFilter` y el buffer de salida se preparan una vez para los N rayos, en lugar de construir un callback por rayo. Lo aprovecha el character controller, que lanza un abanico en cada paso.
 
-Los cuatro existen. La fachada expone descriptores planos y permite modificar en caliente:
+### 6.10 `JointSystem`
 
 ```cpp
 struct HingeJointDesc {
     BodyId a, b;
     Vec3 anchorWorld, axisWorld;
-    bool limitEnabled = false;  float minAngle = 0, maxAngle = 0;
-    bool motorEnabled = false;  float motorSpeed = 0, maxMotorTorque = 0;
+    bool limitEnabled = false; float minAngle = 0, maxAngle = 0;
+    bool motorEnabled = false; float motorSpeed = 0, maxMotorTorque = 0;
+    float breakForce = 0.0f;    // 0 = irrompible (§ abajo)
 };
-JointId createHinge(const HingeJointDesc&);
-void setHingeMotor(JointId, bool enabled, float speed, float maxTorque);  // en runtime
+
+class JointSystem {
+public:
+    JointId createHinge(const HingeJointDesc&);
+    JointId createBallAndSocket(const BallSocketJointDesc&);
+    JointId createSlider(const SliderJointDesc&);
+    JointId createFixed(const FixedJointDesc&);
+    void destroy(JointId);
+
+    void setHingeMotor(JointId, bool enabled, float speed, float maxTorque);   // en caliente
+
+    // Fuerzas internas — rp3d SÍ las expone (verificado)
+    Vec3  reactionForce(JointId, float dt) const;    // Joint::getReactionForce
+    Vec3  reactionTorque(JointId, float dt) const;   // Joint::getReactionTorque
+    float motorTorque(JointId, float dt) const;      // HingeJoint::getMotorTorque
+};
 ```
 
-Todos los parámetros que el encargo exige ajustables en tiempo real tienen *setter* en rp3d (`HingeJoint::enableMotor`, `setMotorSpeed`, `setMaxMotorTorque`, `enableLimit`…), así que es traducción directa.
+Exponer las fuerzas de reacción habilita dos cosas que el encargo no pedía pero que un motor necesita: **visualizar tensiones** en el debug renderer y **romper joints por sobrecarga** (`breakForce`), que el `JointSystem` comprueba en `PostStep`.
 
-### 6.8 Character Controller (H3 — se implementa entero)
+### 6.11 Character Controller (H3)
 
-No existe en rp3d. Diseño propuesto: **cápsula kinemática movida a mano**, no cuerpo dinámico (un cuerpo dinámico con fricción produce el clásico personaje que resbala y se engancha en escalones).
+Cápsula **kinemática** movida a mano, no cuerpo dinámico: un dinámico con fricción produce el personaje que resbala en rampas y se engancha en escalones.
 
 ```mermaid
 flowchart TD
-    IN["Input de movimiento + dt"] --> GND["Detección de suelo:<br/>raycast hacia abajo desde el centro<br/>+ radio de la cápsula + margen"]
-    GND -->|en suelo| SLOPE{"pendiente ≤ maxSlopeAngle?"}
-    GND -->|en aire| GRAV["v.y -= g·dt"]
-    SLOPE -->|sí| MOVE["Movimiento proyectado sobre el plano del suelo"]
+    IN["Input + dt"] --> BATCH["Abanico de raycasts en LOTE<br/>(suelo, frente, escalón, laterales)"]
+    BATCH --> GND{"¿suelo detectado?"}
+    GND -->|no| GRAV["v.y -= g·dt (caída)"]
+    GND -->|sí| SLOPE{"pendiente ≤ maxSlopeAngle?"}
+    SLOPE -->|sí| MOVE["Movimiento proyectado<br/>sobre el plano del suelo"]
     SLOPE -->|no| SLIDE["Deslizamiento por la pendiente"]
-    MOVE --> STEP["Escalones: raycast adelantado;<br/>si el obstáculo < stepHeight,<br/>subir la cápsula"]
-    GRAV --> COLLIDE
-    SLIDE --> COLLIDE
-    STEP --> COLLIDE["Resolución de paredes:<br/>barrido + proyección del<br/>movimiento restante sobre la normal"]
-    COLLIDE --> APPLY["setTransform del cuerpo kinemático"]
+    MOVE --> STEP{"¿obstáculo < stepHeight?"}
+    STEP -->|sí| UP["Subir la cápsula al escalón"]
+    STEP -->|no| WALL
+    GRAV --> WALL
+    SLIDE --> WALL
+    UP --> WALL["Resolución de paredes:<br/>hasta 4 iteraciones proyectando<br/>el movimiento restante sobre la normal"]
+    WALL --> APPLY["setTransform del cuerpo kinemático"]
 ```
 
-Parámetros (a `GameConfig`, como todo lo demás): `radius`, `height`, `stepHeight`, `maxSlopeAngle`, `skinWidth`, `jumpSpeed`, `gravityScale`.
+Parámetros a TOML: `radius`, `height`, `step_height`, `max_slope_angle`, `skin_width`, `jump_speed`, `gravity_scale`, `max_wall_iterations`.
 
-**Prevención de atravesar paredes** (que el encargo pide explícitamente): el movimiento de cada paso se resuelve por barrido en hasta 4 iteraciones, proyectando el desplazamiento restante sobre la normal del impacto. Como rp3d no tiene *shape cast*, el barrido se aproxima con un abanico de raycasts desde la cápsula — limitación conocida que se documenta en el ADR.
+**Limitación conocida:** rp3d no tiene *shape cast*, así que el barrido se aproxima con el abanico de raycasts. Con cápsulas finas y velocidades altas puede colarse por esquinas; el test de §10.1 fija el límite y el ADR lo documenta.
 
-### 6.9 Vehículos (H4 — base preparada, como pide el encargo)
+### 6.12 Vehículos (H4 — base ampliable)
 
-El encargo pide "una base preparada para futuras ampliaciones", así que no se persigue un simulador de conducción:
+```mermaid
+flowchart TD
+    subgraph rueda["Por cada rueda (×4), cada paso"]
+        RC["Raycast hacia abajo desde el anclaje<br/>longitud = reposo + recorrido"]
+        RC --> HIT{"¿toca suelo?"}
+        HIT -->|no| AIR["Rueda en el aire:<br/>sin fuerzas"]
+        HIT -->|sí| SUSP["Suspensión:<br/>F = k·compresión − c·velocidad"]
+        SUSP --> TRAC["Tracción: F a lo largo<br/>del eje de avance"]
+        TRAC --> LAT["Agarre lateral: F opuesta al<br/>deslizamiento lateral"]
+        LAT --> APPLY["applyForceAtWorldPosition<br/>en el punto de contacto"]
+    end
+    APPLY --> CHASIS["Chasis: cuerpo dinámico<br/>con BoxShape"]
+    AIR --> CHASIS
+```
 
-- Chasis: `BoxShape` sobre cuerpo dinámico.
-- 4 ruedas por **raycast de suspensión** (no cuerpos con joints: es lo estándar y evita las inestabilidades de 4 hinges).
-- Cada rueda aplica: fuerza de suspensión (muelle + amortiguador), fuerza de tracción y fuerza lateral de agarre.
-- Estructura preparada para sustituir las ruedas por cuerpos + `HingeJoint` si más adelante hace falta simulación fina.
+Cuatro raycasts, no cuatro cuerpos con hinges: es lo estándar y evita las inestabilidades de cuatro articulaciones acopladas. La estructura queda preparada para sustituir ruedas por cuerpos + `HingeJoint` si algún día hace falta simulación fina.
 
-### 6.10 ECS
-
-El encargo pide cuatro componentes y que **solo `PhysicsManager` los actualice**:
+### 6.13 ECS, jerarquía y gravedad por zona
 
 ```cpp
-struct TransformComponent      { Vec3 position; Quat rotation; Vec3 scale{1,1,1}; };
-struct RigidbodyComponent      { physics::BodyId body; BodyType type; bool sleeping; };
-struct ColliderComponent       { std::vector<physics::ColliderId> colliders; };
-struct PhysicsMaterialComponent{ float density, friction, bounciness;   // por collider
-                                 float mass; Vec3 centerOfMass;         // por cuerpo
-                                 bool allowSleep, active; };
+struct TransformComponent       { Vec3 position; Quat rotation; Vec3 scale{1,1,1}; };
+struct RigidbodyComponent       { physics::BodyId body; BodyType type; bool sleeping; };
+struct ColliderComponent        { SmallVector<physics::ColliderId, 2> colliders; };
+struct PhysicsMaterialComponent { float density, friction, bounciness;    // por collider
+                                  float mass; Vec3 centerOfMass;          // por cuerpo
+                                  bool allowSleep, active; };
+struct GravityZoneComponent     { Vec3 gravity; float radius; };          // §abajo
+struct HierarchyComponent       { EntityId parent; Transform localOffset; };
 ```
 
-Flujo de autoridad, que es lo que evita el bug clásico de dos fuentes de verdad:
+**Autoridad, que es lo que evita dos fuentes de verdad:**
 
 ```mermaid
 flowchart LR
-    subgraph escritura["Escribe SOLO PhysicsManager"]
-        T["TransformComponent"]
-        S["Rigidbody.sleeping"]
-    end
-    subgraph lectura["Escribe el juego, lee la física"]
-        F["fuerzas / velocidades"]
-        M["material / activación"]
-    end
-    F --> PM["PhysicsManager"] --> T & S
-    M --> PM
-    T --> R["Renderer (raylib)"]
+    F["Juego: fuerzas, velocidades,<br/>material, activación"] --> PM["PhysicsManager"]
+    PM --> T["TransformComponent"]
+    PM --> S["Rigidbody.sleeping"]
+    T --> R["Renderer"]
+    style T fill:#1a472a,color:#fff
 ```
 
-**Regla:** nadie escribe `TransformComponent` salvo la sincronización posterior al paso. Mover una entidad se hace con `setTransform`/`applyForce` sobre el cuerpo, nunca tocando el componente — o la física y el render divergen.
+**Regla:** nadie escribe `TransformComponent` salvo `syncTransforms`. Mover una entidad es `setTransform`/`applyForce` sobre el cuerpo — tocar el componente hace divergir física y render.
 
-**Alcance realista:** un ECS completo (arquetipos, vistas, sistemas) es un proyecto en sí mismo. Se propone un ECS **mínimo y suficiente**: `EntityId` + arrays densos por componente con índice disperso. Nada de un framework genérico salvo que el proyecto lo pida más adelante.
+**Jerarquía padre-hijo.** rp3d no tiene grafo de escena: un dron con accesorios, un vehículo con piezas o un personaje con arma lo necesitan. `TransformHierarchy` resuelve `mundo = padre.mundo * hijo.local` **después** de `syncTransforms`, y solo para hijos sin cuerpo propio. Un hijo **con** cuerpo propio se une al padre con un `FixedJoint`, no con jerarquía: mezclar ambas cosas produce el clásico tirón entre lo que dice la física y lo que dice el grafo.
 
-### 6.11 Integración con raylib: conversiones y sincronización
+**Gravedad por zona.** rp3d solo tiene gravedad global. Un cuerpo dentro de una `GravityZoneComponent` desactiva la gravedad global (`body->enableGravity(false)`) y recibe su vector como fuerza en el hook `PreStep`. Con esto salen zonas de baja gravedad, planetoides y ascensores de aire sin tocar el mundo.
+
+### 6.14 `IAssetProvider` para mallas
+
+```cpp
+// drone_physics NO carga ficheros: los recibe ya en memoria.
+class IAssetProvider {
+public:
+    virtual ~IAssetProvider() = default;
+    virtual MeshData convexMesh(AssetId) = 0;       // vértices + índices
+    virtual MeshData concaveMesh(AssetId) = 0;
+    virtual HeightFieldData heightField(AssetId) = 0;
+};
+```
+
+Que `drone_physics` no incluya cargadores de OBJ/GLTF mantiene el módulo limpio **y permite testear las formas de malla con geometría sintética** (un cubo generado en el test) sin ficheros ni assets. La implementación real vive en `src/app/`, junto al resto de la I/O.
+
+### 6.15 Puente con raylib
 
 ```cpp
 // src/frontend/raylib/RaylibPhysicsBridge.h — SOLO en el frontend
-inline ::Vector3 toRaylib(const drone::Vec3& v)   { return {v.x, v.y, v.z}; }
-inline drone::Vec3 fromRaylib(const ::Vector3& v) { return {v.x, v.y, v.z}; }
-
+inline ::Vector3 toRaylib(const drone::Vec3& v)    { return {v.x, v.y, v.z}; }
 inline ::Quaternion toRaylib(const drone::Quat& q) { return {q.x, q.y, q.z, q.w}; }
 
-// Matriz de modelo para DrawMesh: se construye desde posición y cuaternión.
-// NO se usa rp3d::Transform::getOpenGLMatrix: entrega una matriz column-major
-// de OpenGL y raylib::Matrix es row-major — mezclarlas da rotaciones
-// transpuestas, un bug tan silencioso como caro de encontrar.
-inline ::Matrix modelMatrix(const drone::Transform& t, const drone::Vec3& scale) {
+// NO se usa rp3d::Transform::getOpenGLMatrix: entrega column-major de OpenGL y
+// raylib::Matrix es row-major. Mezclarlas da rotaciones transpuestas: un bug
+// silencioso y carísimo de localizar. Se construye desde posición y cuaternión.
+inline ::Matrix modelMatrix(const drone::Transform& t, const drone::Vec3& s) {
     return MatrixMultiply(
-        MatrixMultiply(MatrixScale(scale.x, scale.y, scale.z),
-                       QuaternionToMatrix(toRaylib(t.rotation))),
+        MatrixMultiply(MatrixScale(s.x, s.y, s.z), QuaternionToMatrix(toRaylib(t.rotation))),
         MatrixTranslate(t.position.x, t.position.y, t.position.z));
 }
 ```
 
-Nótese el reparto: **las conversiones a raylib viven en el frontend**, no en `drone_physics`. El módulo de física no conoce raylib, igual que no lo conoce el core. La "sincronización automática" que pide el encargo se cumple así: el renderer recorre las entidades con `TransformComponent` y dibuja; nadie sincroniza a mano.
+Las conversiones viven en el **frontend**: `drone_physics` no conoce raylib, igual que no lo conoce el core. La "sincronización automática" del encargo se cumple porque el renderer recorre las entidades con `TransformComponent` y dibuja; nadie sincroniza a mano.
 
-### 6.12 Debug Renderer (H5 — 6 nativos + 4 propios)
+### 6.16 Debug: `IPhysicsDebugger` (H5)
+
+Los 6 elementos nativos se vuelcan al debugger tras cada paso:
 
 ```cpp
 world->setIsDebugRenderingEnabled(true);
 rp3d::DebugRenderer& dr = world->getDebugRenderer();
-dr.setIsDebugItemDisplayed(rp3d::DebugRenderer::DebugItem::COLLISION_SHAPE, true);
-dr.setIsDebugItemDisplayed(rp3d::DebugRenderer::DebugItem::CONTACT_POINT, true);
-// … tras world->update():
-for (uint32 i = 0; i < dr.getNbLines(); ++i)     { /* DrawLine3D */ }
-for (uint32 i = 0; i < dr.getNbTriangles(); ++i) { /* DrawTriangle3D */ }
+dr.setIsDebugItemDisplayed(DebugItem::COLLISION_SHAPE, true);
+// tras update(): recorrer dr.getNbLines() / dr.getNbTriangles() → IPhysicsDebugger
 ```
 
 | Elemento pedido | Origen |
 |---|---|
 | Bounding boxes / AABB | `COLLIDER_AABB` + `COLLIDER_BROADPHASE_AABB` |
-| Colliders: cápsulas, esferas, convex, concave, heightfields | `COLLISION_SHAPE` (cubre las 6 formas) |
-| Normales | `COLLISION_SHAPE_NORMAL` + `CONTACT_NORMAL` |
-| Contact points | `CONTACT_POINT` |
-| **Raycasts** | **Propio:** buffer de rayos lanzados en el frame + `DrawLine3D` |
-| **Centros de masa** | **Propio:** `getLocalCenterOfMass()` → esfera pequeña |
-| **Joints** | **Propio:** línea entre anclajes + marcador del eje |
+| Colliders (cápsulas, esferas, convex, concave, heightfields) | `COLLISION_SHAPE` |
+| Normales · Contact points | `COLLISION_SHAPE_NORMAL`, `CONTACT_NORMAL`, `CONTACT_POINT` |
+| **Raycasts** | **Propio:** el `QuerySystem` graba los rayos del frame cuando el debug está activo |
+| **Centros de masa** | **Propio:** `getLocalCenterOfMass()` → esfera |
+| **Joints** | **Propio:** línea entre anclajes + eje + **magnitud de la fuerza de reacción** (§6.10) |
 | **Ejes locales** | **Propio:** tres líneas RGB desde el transform |
 
-Todo detrás de un único interruptor en `GameConfig` (`[debug] physics = true`) más subinterruptores por elemento.
+Todo tras `[physics.debug] enabled` más subinterruptores por elemento.
 
-### 6.13 CCD emulado (H1)
+### 6.17 CCD emulado (H1), por cuerpo
 
-rp3d no lo trae. Estrategia por capas, de barato a caro, activable por cuerpo:
+rp3d no lo trae y `update()` no subdivide (C1), así que:
 
-1. **Subpasos adaptativos:** si `velocidad · dt > minGrosorCollider · 0.5`, dividir el paso en *N* subpasos para ese frame. Cubre la mayoría de casos con coste proporcional a la velocidad.
-2. **Raycast de barrido previo:** para cuerpos marcados `ccd = true` (proyectiles), lanzar un rayo desde la posición previa a la prevista antes del paso; si impacta, reposicionar el cuerpo justo antes del impacto y emitir el contacto a mano.
-3. **Documentar el límite:** ninguna de las dos es CCD real (no hay *shape casting* rotacional). Se declara en el ADR y se cubre con un test: *un proyectil a 100 m/s contra una pared de 0,1 m no la atraviesa*.
+```mermaid
+flowchart TD
+    A["Antes del paso, por cuerpo con ccd=true"] --> B{"|v|·dt > minGrosor·0.5 ?"}
+    B -->|no| N["Paso normal"]
+    B -->|sí| C["Raycast de barrido:<br/>posición previa → posición prevista"]
+    C --> D{"¿impacta?"}
+    D -->|no| E{"maxSubSteps del cuerpo > 1?"}
+    D -->|sí| F["Reposicionar justo antes del impacto<br/>+ emitir contacto a mano"]
+    E -->|sí| G["Subdividir el paso global<br/>en N = max(maxSubSteps) subpasos"]
+    E -->|no| N
+    style F fill:#5c1a1a,color:#fff
+```
+
+**Corrección respecto a la sugerencia #4:** los subpasos **no pueden ser por cuerpo**. `world->update()` avanza el mundo entero, así que subdividir afecta a todos. Por eso el mecanismo es de dos capas:
+
+- **El barrido por raycast sí es por cuerpo** (`BodyDesc::maxSubSteps > 1` marca al cuerpo como candidato) y es la vía barata: un proyectil paga su rayo y nadie más paga nada.
+- **La subdivisión global** solo se activa si algún cuerpo lo exige y está **acotada** por `[physics.step] max_sub_steps`. El profiler cuenta los frames subdivididos para que el coste sea visible en vez de sorpresa.
+
+Ninguna de las dos es CCD real (no hay *shape casting* rotacional). Se declara en el ADR y se cubre con el test de §10.1.
+
+### 6.18 `PhysicsProfiler` — desde la Fase 1
+
+Optimizar en la Fase 6 sin datos de las fases 1-5 es adivinar. El profiler entra con el primer cuerpo:
+
+```cpp
+struct PhysicsStats {
+    uint32_t bodiesTotal, bodiesAwake, contactPairs, eventsDispatched;
+    uint32_t raycastsThisFrame, subStepsThisFrame;
+    float msPreStep, msSolver, msPostStep, msSync;   // media móvil
+};
+```
+
+Se muestra en el HUD de debug y se vuelca al log cada N frames. **Criterio:** ningún trabajo de optimización se acepta sin un antes/después de estos contadores.
+
+### 6.19 `PhysicsRewindSystem`
+
+rp3d es determinista con el mismo binario: eso se explota para depurar y para tests.
+
+```cpp
+struct PhysicsFrame {   // instantánea mínima: rp3d no serializa nada por sí mismo
+    std::vector<BodyState> bodies;   // transform + velocidades lineal y angular
+    uint64_t frameIndex;
+};
+class PhysicsRewindSystem {
+    void record(const PhysicsManager&);          // en PostSync, si está activo
+    void restore(PhysicsManager&, uint64_t frame);
+    void replay(PhysicsManager&, std::span<const InputFrame>);
+};
+```
+
+Usos: reproducir un bug frame a frame, y el test de determinismo por rebobinado de §10.3. Solo activo en builds de debug o bajo bandera.
+
+### 6.20 `IslandTracker` (corrección C3)
+
+rp3d agrupa cuerpos en islas internamente pero **no lo expone**. Para "mundo abierto" la información es útil (desactivar islas enteras lejanas), así que se calcula:
+
+```cpp
+// Union-find sobre los pares de contacto que los puentes ya reciben.
+// No consulta nada a rp3d: reutiliza información que ya pasa por nuestras manos.
+class IslandTracker {
+    void onContactPair(BodyId a, BodyId b);   // union
+    void rebuild();                            // en PostStep
+    IslandId island(BodyId) const;
+    std::span<const BodyId> bodiesIn(IslandId) const;
+};
+```
+
+Coste: proporcional a los pares de contacto, que ya se recorren para despachar eventos.
+
+### 6.21 `PhysicsLODSystem`
+
+Sin LOD de física, un mundo abierto simula igual de caro lo que está a 5 m que lo que está a 500 m:
+
+| Distancia al jugador | Política |
+|---|---|
+| < `near` | Simulación completa cada paso |
+| `near` … `far` | Actualización cada 2-3 pasos; sin contactos entre pares de esta banda |
+| > `far` | Isla desactivada (`setActive(false)`); se reactiva al acercarse |
+| > `cull` | Descarga del mundo físico (el cuerpo se destruye y se recrea al volver) |
+
+Las bandas van a TOML. La política se apoya en el `IslandTracker`: se activa y desactiva **por isla**, nunca por cuerpo suelto, o una caja de una pila se congelaría con el resto de la pila en movimiento.
 
 ---
 
 ## 7. Impacto sobre lo que ya funciona
 
-Lo que este cambio rompe, y qué hacer con cada cosa. **Ninguno es un obstáculo, pero todos cuestan tiempo y hay que contarlos.**
+**Ninguno es un obstáculo, pero todos cuestan tiempo y hay que contarlos.**
 
 | Qué | Impacto | Acción |
 |---|---|---|
-| **`TestPhysics.cpp` (9 tests)** | Escritos contra la física propia: hover exacto, velocidad terminal `m·g/k`, clamp del suelo. Con rp3d los valores cambian | Reescribir como tests de comportamiento con tolerancias (*el dron se sostiene ±0,3 m en 10 s*), no de fórmula |
-| **Test de determinismo** (`misma semilla ⇒ trayectoria idéntica` con `==` de floats) | rp3d es determinista con el mismo binario, **no entre plataformas**. Fallaría en la matriz de CI | Comparar con tolerancia y marcar el test estricto como *same-platform*; mantener determinismo exacto solo para el viento (que es nuestro y sí lo es) |
-| **`SaveData`** | Hoy guarda posición y velocidad del dron. El estado autoritativo pasa a rp3d, y con ECS hay N cuerpos | Guardar por entidad; subir `version` a 2 y mantener la carga de v1 (ya hay validación estricta que reutilizar) |
-| **`WorldState`** | Un solo dron + obstáculos. Con ECS son N entidades | Pasar a lista de entidades renderizables. **Ojo:** hoy se copia por valor cada frame; con N cuerpos hay que dejar de copiar (buffer reutilizable) |
-| **Frontend terminal** | Un HUD ANSI no puede mostrar un mundo 3D con N cuerpos | Se mantiene como vista reducida (dron + telemetría). Es el frontend que hace de red de seguridad para tests de humo sin GPU |
-| **`GameConfig`** | Los parámetros de física propia (`dragCoefficient`, `crashSpeed`…) cambian de significado | Sección `[physics]` nueva en `game.toml`; el `validateConfig` con rangos ya existe y se extiende |
-| **CI** | rp3d por FetchContent alarga el build; hay un guard nuevo que añadir | Caché de `_deps` en Actions + guard `! grep -rn "reactphysics3d" src/core src/frontend src/app` |
-| **`ADR-004`** | Queda contradicho | Marcar *Reemplazado por ADR-008* (no borrar: el histórico de decisiones es el valor de un ADR) |
-| **Tamaño y licencia** | rp3d son ~13 MB de fuentes, licencia **zlib** (permisiva, compatible con el MIT del proyecto) | Sin problema legal; documentar en el README |
+| **`TestPhysics.cpp` (9 tests)** | Escritos contra fórmulas de la física propia (hover exacto, velocidad terminal `m·g/k`) | Reescribir como tests de comportamiento con tolerancias (§10.1) |
+| **Test de determinismo** (`==` de floats) | rp3d no es determinista entre plataformas: la matriz de CI se pondría intermitente | Tolerancia + test estricto por rebobinado en el mismo binario (§10.3) |
+| **`SaveData`** | Guarda posición y velocidad del dron; el estado autoritativo pasa a rp3d y con ECS hay N cuerpos | `version = 2` por entidad, **con carga de v1 y test de compatibilidad** (§8, Fase 1) |
+| **`WorldState`** | Un dron + obstáculos, copiado por valor cada frame | Lista de entidades con buffer reutilizable: sin asignaciones en el bucle caliente |
+| **Frontend terminal** | Un HUD ANSI no muestra un mundo 3D con N cuerpos | Vista reducida (dron + telemetría). Es la red de seguridad para tests de humo sin GPU |
+| **`GameConfig`** | Los parámetros propios (`dragCoefficient`, `crashSpeed`) cambian de significado | Secciones `[physics.*]` nuevas (§6.1); `validateConfig` ya existe y se extiende |
+| **CI** | rp3d alarga el build; hay un guard nuevo | Caché de `_deps` + guard `! grep -rn "reactphysics3d" src/core src/frontend src/app` |
+| **`ADR-004`** | Contradicho | Marcar *Reemplazado por ADR-008*; no borrar |
+| **Licencia** | rp3d es **zlib**, permisiva y compatible con el MIT del proyecto | Documentar en README |
 
 ---
 
 ## 8. Plan por fases con criterios de aceptación
 
-Cada fase deja **el juego compilando, jugable y con la CI en verde**. Estimaciones para un desarrollador.
+Reglas transversales, aplicables a **todas** las fases:
 
-### Fase 0 — Decisión y espiga técnica (1 semana)
+- La fase termina con **un binario jugable** que un tester pueda ejecutar y comentar. Una fase que "funciona" pero no se ve, no se puede validar.
+- Estimaciones con **rango optimista–pesimista**. El rango superior se activa si se dispara alguno de los riesgos de §9.
+- Cada fase actualiza `docs/physics/CHANGELOG-fisica.md` (§11.3).
 
-| Tarea | Criterio de aceptación |
-|---|---|
-| ADR-008 (§4) y marcar ADR-004 como reemplazado | Ficheros en `docs/adr/`, enlazados desde el README |
-| rp3d por `FetchContent` con `GIT_TAG v0.10.2` fijo, `SYSTEM` | Compila en Linux/macOS/Windows en la matriz de CI |
-| Espiga: caja cayendo sobre un plano, dibujada con raylib | Ejecutable de espiga muestra la caja cayendo y reposando; se descarta tras la fase |
-| Medir el impacto en el tiempo de CI | Build completo < 8 min con caché de `_deps` |
+### Fase −1 — Formación (0–2 semanas, **condicional**)
 
-**DoD:** decisión tomada por escrito y riesgo de compilación multiplataforma cerrado **antes** de tocar el juego.
+Solo si quien implementa no ha trabajado antes con un motor de físicas iterativo. Contenido: leer los headers de rp3d, el solver iterativo (por qué las iteraciones importan), estabilidad de pilas, diferencia entre *impulso* y *fuerza*, y el patrón de timestep fijo. **Disparador:** si en la espiga de la Fase 0 el desarrollador no sabe explicar por qué una pila de 10 cajas tiembla, esta fase se activa.
 
-### Fase 1 — `PhysicsManager` y migración del dron (4 semanas) · *la fase que decide todo*
+### Fase 0 — Decisión, espiga y línea base (1–2 semanas)
 
 | Tarea | Criterio de aceptación |
 |---|---|
-| Módulo `drone_physics` con pimpl y handles (§6.1) | `! grep -rn "reactphysics3d" src/core src/frontend src/app` pasa como job de CI |
-| Fixed step + interpolación (§6.2) | El bucle de 60 Hz existente no cambia; el render interpola |
-| Dron como cuerpo dinámico (esfera) + obstáculos estáticos (cajas) | El dron vuela, choca con los edificios y se posa en el suelo |
-| Empuje, viento y batería reescritos como fuerzas | `applyForce` sustituye la integración manual; batería y XP intactas |
-| Reescritura de `TestPhysics` a tests de comportamiento (§7) | Suite verde; el dron en hover mantiene altura ±0,3 m en 10 s |
-| Borrar `PhysicsEngine.cpp` propio | Ya no existe física duplicada |
+| ADR-008 a ADR-013 (§4) y ADR-004 marcado *Reemplazado* | Ficheros en `docs/adr/`, enlazados desde el README |
+| rp3d por `FetchContent`, `GIT_TAG v0.10.2`, `SYSTEM` | Compila en Linux/macOS/Windows en la matriz de CI |
+| Espiga: caja cayendo sobre un plano con raylib | Ejecutable descartable que muestra la caja cayendo y reposando |
+| **Benchmark de rp3d aislado, sin el juego** | 1.000 cajas cayendo: FPS y ms/paso registrados en `docs/physics/baseline.md` |
+| Impacto en el tiempo de CI | Build completo < 8 min con caché de `_deps` |
 
-**DoD de la fase 1 (hito clave):** **el juego actual es indistinguible para el jugador, pero por dentro lo mueve rp3d.** Si esta fase no llega aquí, no se sigue: se revisa el diseño.
+**Por qué el benchmark aislado:** si en la Fase 6 el rendimiento decepciona, esta línea base dice si la culpa es de rp3d o de nuestra capa. Sin ella, es una discusión de opiniones.
 
-### Fase 2 — Eventos, materiales, filtrado y raycasts (3 semanas)
-
-| Tarea | Criterio de aceptación |
-|---|---|
-| `ContactBridge` → EventBus: 6 eventos (§6.5) | Test: dron contra edificio produce `Enter` → `Stay`… → `Exit` en ese orden |
-| Impulso estimado (H2) | Documentado como estimación; sustituye a la velocidad de impacto actual sin cambiar la sensación de juego |
-| Materiales completos (§6.4) | Cambiar `bounciness` en `game.toml` cambia el rebote sin recompilar |
-| Categorías, máscaras y triggers | Test: un trigger notifica y **no** frena al dron |
-| `raycast` / `raycastAll` / `raycastClosest` (§6.6) | Tests de las tres semánticas; un altímetro por raycast sustituye a `position.y` |
-| Sleeping + activación dinámica | Test: cuerpo en reposo deja de consumir CPU (contador de cuerpos activos) |
-
-### Fase 3 — ECS y formas restantes (4 semanas)
+### Fase 1 — `PhysicsManager` y migración del dron (4–6 semanas) · *la fase que decide todo*
 
 | Tarea | Criterio de aceptación |
 |---|---|
-| ECS mínimo con los 4 componentes (§6.10) | Solo `PhysicsManager` escribe `TransformComponent` (revisión + test) |
-| Cápsula y esfera; múltiples colliders por cuerpo | Un cuerpo con 2 colliders tiene la masa e inercia correctas |
-| Carga de `assets/levels/city.json` (hoy muerto) | Los obstáculos salen del fichero, no del código |
-| `WorldState` como lista de entidades, sin copia por frame | Sin asignaciones dentro del bucle caliente (medido) |
-| Convex/Concave/HeightField + pipeline mínimo de mallas | Un nivel con terreno heightfield es jugable |
+| `HandlePool` con tests propios (§6.2) | Suite de §10.4 en verde, sin depender de rp3d |
+| `PhysicsSettings` completo desde TOML (§6.1) | Cambiar `velocity_solver_iterations` cambia el comportamiento sin recompilar |
+| Módulo `drone_physics` con pimpl (§6.3) | `! grep -rn "reactphysics3d" src/core src/frontend src/app` como job de CI |
+| `PhysicsPipeline` con las 4 fases y ganchos (§5.1) | Un hook de prueba duplica la gravedad un frame sin tocar el manager |
+| `PhysicsProfiler` (§6.18) | Contadores visibles en el HUD de debug desde el primer día |
+| Dron dinámico + obstáculos estáticos; empuje/viento como fuerzas | El dron vuela, choca con los edificios y se posa |
+| **Checklist de limpieza de la física propia** | Ver abajo — los 5 puntos verificados |
+| **Migración de savegames v1 → v2** | Test que carga un save v1 real y produce una partida jugable |
+| Reescritura de `TestPhysics` a comportamiento (§10.1) | Suite verde; hover ±0,3 m en 10 s |
 
-### Fase 4 — Debug renderer y joints (3 semanas)
+**Checklist de limpieza (no basta "borrar PhysicsEngine.cpp"):**
 
-| Tarea | Criterio de aceptación |
-|---|---|
-| Los 6 elementos nativos (§6.12) | `[debug] physics = true` los dibuja sobre la escena |
-| Los 4 propios: raycasts, centros de masa, joints, ejes locales | 13/13 elementos del encargo visibles |
-| Los 4 joints con parámetros en caliente (§6.7) | Escena de prueba: péndulo (hinge), puente (ball-socket), ascensor (slider) |
+1. `git rm src/core/PhysicsEngine.{h,cpp}`
+2. Ningún `#include "core/PhysicsEngine.h"` en el árbol
+3. Sin miembros `m_physics` ni referencias en `World`
+4. Tests antiguos migrados o eliminados, no comentados
+5. `grep -rn "PhysicsEngine" src/ tests/` devuelve **cero** líneas
 
-### Fase 5 — Character controller, vehículos y CCD (5 semanas)
+**DoD (hito clave):** **el juego es indistinguible para el jugador, pero por dentro lo mueve rp3d.** Si la fase no llega aquí, no se sigue: se revisa el diseño (§9, contingencia de R1).
 
-| Tarea | Criterio de aceptación |
-|---|---|
-| Character controller (§6.8) | Sube escalones ≤ `stepHeight`, resbala en pendientes > `maxSlopeAngle`, **no atraviesa paredes a velocidad máxima** |
-| Base de vehículo (§6.9) | Un vehículo acelera, gira y no vuelca en llano |
-| CCD emulado (§6.13) | Test: proyectil a 100 m/s contra pared de 0,1 m **no** la atraviesa |
-| Object pooling y reutilización de formas | 1.000 cuerpos creados y destruidos sin crecimiento de memoria (medido con ASan) |
-
-### Fase 6 — Optimización y cierre (2 semanas)
+### Fase 2 — Eventos, materiales, filtrado y consultas (3–4 semanas)
 
 | Tarea | Criterio de aceptación |
 |---|---|
-| Perfilado y presupuesto de frame | 500 cuerpos dinámicos a 60 FPS estables |
-| Actualizar solo cuerpos activos en la sincronización | El coste por frame escala con cuerpos **despiertos**, no totales |
-| Documentación: `docs/physics.md` + ADRs | Un desarrollador nuevo añade un cuerpo físico siguiendo solo la documentación |
+| `ContactBridge` + `TriggerBridge` separados (§6.7) | Test: dron contra edificio da `Enter` → `Stay`… → `Exit` en ese orden |
+| Impulso estimado (H2) + `getContacts(BodyId)` (C4) | Un cuerpo apoyado reporta sus contactos activos cada frame |
+| Materiales completos (§6.6) | Cambiar `bounciness` en TOML cambia el rebote sin recompilar |
+| Capas + matriz de colisión validada (§4.5) | Una matriz asimétrica en el TOML **falla al cargar** con un mensaje claro |
+| `ContactFilter` dinámico por máscara (C5) | Un power-up hace que el dron atraviese edificios y luego vuelve a colisionar |
+| `PhysicsQuerySystem`: 3 raycasts + lote + overlaps (§6.9) | Altímetro por raycast sustituye a `position.y`; `overlapSphere` lista cuerpos cercanos |
+| Sleeping y activación | El contador `bodiesAwake` del profiler baja al reposar la escena |
+
+### Fase 2.5 — Integración vertical del dron (1 semana)
+
+Una fase corta y deliberada: **que el dron use de verdad todo lo construido**, en lugar de acumular sistemas que nadie ejerce.
+
+| Tarea | Criterio de aceptación |
+|---|---|
+| Materiales reales por superficie | El dron rebota distinto en suelo y en edificio |
+| Altímetro y detección de obstáculos por raycast | El HUD muestra distancia al suelo real, no `position.y` |
+| Eventos de colisión → sonido y aviso en pantalla | Un choque suena y se ve en ambos frontends |
+| Capas aplicadas al juego real | Dron, edificios, suelo y triggers en sus capas, definidas en TOML |
+
+**DoD:** una partida completa ejercita colisiones, materiales, raycasts, eventos y capas. Es el momento de validar con un tester que "la sensación es la misma o mejor".
+
+### Fase 3 — ECS, jerarquía y formas restantes (4–6 semanas)
+
+| Tarea | Criterio de aceptación |
+|---|---|
+| ECS con archetypes y los 4 componentes (§6.13) | Iterar `(Transform, Rigidbody)` no toca entidades sin cuerpo (test con contador) |
+| `TransformHierarchy` padre-hijo | Un dron con accesorio: el accesorio sigue al dron sin cuerpo propio |
+| `GravityZoneComponent` | Una zona de baja gravedad altera la caída sin tocar la gravedad global |
+| Cápsula y esfera; varios colliders por cuerpo | Un cuerpo con 2 colliders tiene masa e inercia correctas |
+| `IAssetProvider` + convex/concave/heightfield (§6.14) | Formas de malla testeadas con geometría **sintética**, sin ficheros |
+| Carga de `assets/levels/city.json` (hoy muerto) | Los obstáculos salen del fichero; `createBodies` en lote |
+| `WorldState` sin copia por frame | Cero asignaciones en el bucle caliente (medido) |
+
+### Fase 4 — Debug renderer y joints (3–4 semanas)
+
+| Tarea | Criterio de aceptación |
+|---|---|
+| `IPhysicsDebugger` + implementación raylib (§6.16) | Dos debuggers simultáneos (pantalla + volcado a fichero) sin tocar el manager |
+| 6 elementos nativos + 4 propios | **13/13** elementos del encargo visibles |
+| `JointSystem` con los 4 joints en caliente (§6.10) | Escenas: péndulo (hinge), puente (ball-socket), ascensor (slider) |
+| Fuerzas de reacción y `breakForce` | Un joint sobrecargado se rompe; el debug dibuja la tensión |
+
+### Fase 5 — Character controller, vehículos y CCD (5–7 semanas)
+
+| Tarea | Criterio de aceptación |
+|---|---|
+| Character controller (§6.11) | Sube escalones ≤ `step_height`, resbala en pendientes mayores, **no atraviesa paredes a velocidad máxima** |
+| Base de vehículo (§6.12) | Acelera, gira y no vuelca en llano |
+| CCD emulado por cuerpo (§6.17) | Proyectil a 100 m/s contra pared de 0,1 m **no** la atraviesa |
+| `IslandTracker` (§6.20) | Islas correctas en una escena con dos pilas separadas |
+
+### Fase 6 — LOD, rendimiento y cierre (2–4 semanas)
+
+| Tarea | Criterio de aceptación |
+|---|---|
+| `PhysicsLODSystem` (§6.21) | 5.000 cuerpos en el mundo, 500 activos: 60 FPS estables |
+| `PhysicsRewindSystem` (§6.19) | Rebobinar 100 frames y re-simular da el mismo resultado bit a bit |
+| Optimización guiada por el profiler | Cada mejora con antes/después de `PhysicsStats` |
+| Documentación completa (§11) | Un desarrollador nuevo añade un cuerpo siguiendo solo las guías |
 
 ```mermaid
 gantt
     dateFormat YYYY-MM-DD
-    title Integración de ReactPhysics3D
+    title Integración de ReactPhysics3D (ruta central ≈ 29 semanas)
     section Base
-    F0 Decisión y espiga            :f0, 2026-08-10, 7d
-    F1 PhysicsManager + dron        :crit, f1, after f0, 28d
+    F-1 Formación (condicional)   :done, fm1, 2026-08-10, 7d
+    F0 Decisión, espiga, baseline :f0, after fm1, 10d
+    F1 PhysicsManager + dron      :crit, f1, after f0, 35d
     section Sistemas
-    F2 Eventos y raycasts           :f2, after f1, 21d
-    F3 ECS y formas                 :f3, after f2, 28d
-    F4 Debug y joints               :f4, after f3, 21d
+    F2 Eventos y consultas        :f2, after f1, 24d
+    F2.5 Integración vertical     :crit, f25, after f2, 7d
+    F3 ECS, jerarquía, formas     :f3, after f25, 35d
+    F4 Debug y joints             :f4, after f3, 24d
     section Avanzado
-    F5 Controller, vehículos, CCD   :f5, after f4, 35d
-    F6 Optimización y cierre        :f6, after f5, 14d
+    F5 Controller, vehículos, CCD :f5, after f4, 42d
+    F6 LOD, rendimiento, cierre   :f6, after f5, 21d
 ```
 
 ---
 
-## 9. Riesgos
+## 9. Riesgos, disparadores y contingencias
 
-| # | Riesgo | Prob. | Impacto | Mitigación |
+Cada riesgo con **disparador medible** y **acción concreta**, no una intención.
+
+| # | Riesgo | Prob. | Disparador | Contingencia |
 |---|---|---|---|---|
-| R1 | **La Fase 1 revela que el dron "se siente" distinto** (rp3d con fuerzas ≠ integrador propio) y hay que reajustar todo el pilotaje | Alta | Medio | Los parámetros ya están en `game.toml`: se itera sin recompilar. Reservar 3 días de ajuste dentro de la fase |
-| R2 | rp3d no compila limpio con `-Werror` en alguna plataforma de la matriz | Media | Alto | Marcarla `SYSTEM` desde el principio (ya se hizo con spdlog por esto mismo). Verificado en Fase 0, no al final |
-| R3 | El determinismo entre plataformas se da por hecho y la CI se vuelve intermitente | Media | Alto | Reescribir el test **en la Fase 1**, no cuando falle. Un test intermitente que se ignora envenena toda la suite |
-| R4 | Alcance: character controller y vehículos son proyectos en sí mismos y el juego del dron no los usa | **Alta** | Alto | Están al final a propósito. Si el tiempo aprieta, se cortan las Fases 5-6 y el motor sigue siendo completo para el juego |
-| R5 | El impulso estimado (H2) se usa como si fuera exacto | Media | Bajo | Nombre y comentario explícitos en la API; documentado en §6.5 |
-| R6 | Convex/concave/heightfield sin assets: se implementa código que nadie puede probar | Media | Medio | La Fase 3 incluye el pipeline mínimo de mallas; sin assets, esas formas no se dan por terminadas |
-| R7 | El tiempo de CI se dispara con rp3d + raylib + Catch2 + spdlog + toml++ | Media | Medio | Caché de `_deps`, medida en Fase 0 con umbral de 8 min |
+| R1 | **El dron "se siente" distinto** con rp3d | Alta | El tester lo rechaza al final de la Fase 1 | 3 días de ajuste de parámetros (ya en TOML). Si a los 3 días sigue mal: **capa de asistencia de vuelo** (amortiguación de entrada) en vez de seguir peleando con el solver |
+| R2 | **La Fase 1 se va de 6 semanas** | Media | Semana 7 sin cumplir el DoD | Congelar alcance en "dron + cajas estáticas + profiler", mover pipeline y settings a la Fase 2, y **replanificar el resto con los datos reales**, no con la estimación original |
+| R3 | rp3d no compila con `-Werror` en alguna plataforma | Media | Job rojo en la Fase 0 | `SYSTEM` desde el principio; si aun así falla, excluir esa plataforma de `-Werror` documentándolo, nunca desactivar el flag globalmente |
+| R4 | **Determinismo intermitente en CI** | Media | Un test de física falla de forma no reproducible | Reescribir a tolerancias **en la Fase 1**, no cuando falle. Un test intermitente tolerado envenena la suite entera |
+| R5 | **Alcance: character controller y vehículos** no los usa el juego | **Alta** | Semana 20 con la Fase 4 sin cerrar | Cortar Fases 5-6. El motor sigue completo **para el juego**; se documenta como "no implementado", nunca como "hecho" |
+| R6 | Formas de malla sin assets que probar | Media | Fase 3 sin mallas reales | Geometría sintética en los tests (§6.14). Si al acabar la fase no hay assets, esas formas quedan marcadas *sin validar en producción* |
+| R7 | El tiempo de CI se dispara | Media | Build > 12 min | Caché de `_deps`; si no basta, precompilar rp3d como artefacto por plataforma |
+| R8 | **El plan se convierte en deuda documental** | Media | 3 semanas sin actualizarlo | Actualizarlo es tarea de cierre de cada fase, con el CHANGELOG de física (§11.3) |
 
 ---
 
-## 10. Trazabilidad con el encargo
+## 10. Estrategia de pruebas
 
-Cada apartado del encargo, dónde se cumple y con qué salvedad. **Sin marcar como hecho nada que la librería no dé.**
+```mermaid
+flowchart TB
+    FUZZ["Fuzzing (§10.8)<br/>1.000 frames con cuerpos aleatorios: ni crash ni NaN"]
+    BENCH["Benchmarks (§10.6)<br/>fixedStep · raycast · sync con N cuerpos"]
+    STRESS["Estrés (§10.2)<br/>torre de 500 cajas estable"]
+    INT["Integración (§10.5)<br/>joints, escenas mínimas, dron completo"]
+    REG["Regresión de vuelo (§10.1)<br/>maniobras de referencia con tolerancia"]
+    UNIT["Unitarios (§10.4)<br/>HandlePool · LayerRegistry · conversiones · bordes"]
+    FUZZ --- BENCH --- STRESS --- INT --- REG --- UNIT
+    style UNIT fill:#1a472a,color:#fff
+    style REG fill:#1a3a5c,color:#fff
+```
+
+**§10.1 · Regresión de vuelo.** Maniobras de referencia con posición y orientación esperadas y **tolerancia explícita**: despegue vertical de 2 s, hover de 10 s, caída libre desde 20 m, choque lateral contra edificio. Si un cambio de parámetros o de versión de rp3d altera el vuelo, salta. Sustituye a los tests de fórmula de la física propia.
+
+**§10.2 · Estrés.** Una torre de 500 cajas apiladas debe seguir en pie tras 10 s: es el "hola mundo" del estrés en motores de física y detecta regresiones en las iteraciones del solver o en `WorldSettings`. Segundo caso: 1.000 cuerpos creados y destruidos sin crecimiento de memoria (con ASan).
+
+**§10.3 · Determinismo por rebobinado, dentro del mismo binario.** Simular 100 pasos, guardar el estado con `PhysicsRewindSystem`, resetear el mundo, re-simular con las mismas entradas y exigir **igualdad bit a bit**. Esto sí es válido en CI multiplataforma, porque compara el binario consigo mismo — a diferencia del test actual, que compara contra constantes grabadas.
+
+**§10.4 · Unitarios sin rp3d.** `HandlePool` (asignar, liberar, reusar índice con generación nueva, usar handle caduco → error detectable), `LayerRegistry` (matriz asimétrica rechazada, >16 capas rechazadas), `ShapeKey` (cuantización estable), conversiones matemáticas. Son los tests más baratos y los que más bugs atrapan.
+
+**§10.5 · Integración de joints.** Péndulo con hinge (periodo aproximado), slider bajo fuerza constante (desplazamiento esperado), fixed joint (distancia invariante), ball-socket (cadena que no se desmonta). Verifican la fachada **y** avisan si rp3d cambia semántica en una actualización.
+
+**§10.6 · Benchmarks** con `BENCHMARK` de Catch2: `fixedStep(1/60)` con 100/500/1.000 cuerpos, `closest` en un mundo con M colliders, `syncTransforms` con K activos. Línea base registrada en `docs/physics/baseline.md`; una optimización que empeore otra métrica se ve al instante.
+
+**§10.7 · Bordes.** Masa 0 o negativa (rechazada con error definido), escala 0, velocidad NaN o infinita (saneada al entrar, nunca propagada), cuerpo sin colliders, collider sin cuerpo, handle de un cuerpo ya destruido, timestep 0 y negativo.
+
+**§10.8 · Fuzzing.** 1.000 frames con cuerpos, formas, fuerzas y destrucciones aleatorias con semilla fija: el mundo no debe crashear ni producir NaN. No sustituye a los tests dirigidos, pero encuentra los bugs de integración que nadie imagina.
+
+---
+
+## 11. Documentación
+
+**§11.1 · `docs/physics/` con guías por caso de uso**, no solo referencia de API. Lo que un desarrollador necesita el primer día: *cómo añadir un cuerpo estático*, *cómo hacer un proyectil*, *cómo configurar capas*, *cómo depurar un cuerpo que atraviesa el suelo*, *cómo perfilar un frame lento*. La referencia se genera; las guías se escriben.
+
+**§11.2 · `docs/physics/MIGRATION.md`** — la diferencia de comportamiento entre la física propia y rp3d, por escrito y **antes** de que alguien pregunte por qué el dron se siente raro:
+
+| Antes (física propia) | Ahora (rp3d) | Qué ajustar |
+|---|---|---|
+| Arrastre lineal `k·(viento − v)` | Damping lineal/angular + fricción de contacto | `linear_damping`, `friction` |
+| Respuesta de suelo: clamp instantáneo | Solver iterativo con restitución | `bounciness`, `restitution_velocity_threshold` |
+| Sin rotación (el dron era un punto) | Cuerpo con inercia: puede volcar | `angular_damping`, centro de masa |
+| Colisión = evento con velocidad de impacto | Contacto con normal, penetración e impulso estimado | Umbral de choque en `[physics]` |
+
+**§11.3 · `docs/physics/CHANGELOG-fisica.md` desde la Fase 1.** Cada cambio de parámetro en `game.toml`, cada tolerancia ajustada en un test, cada tipo de cuerpo nuevo. Cuando en la Fase 4 el dron deje de flotar bien, poder señalar el cambio concreto de la Fase 3 vale más que un día de bisect.
+
+**§11.4 · Diagramas de secuencia** para lo complejo: character controller (§6.11), vehículo (§6.12) y CCD emulado (§6.17) ya los tienen en este documento; se mantienen sincronizados con el código.
+
+**§11.5 · El "por qué" en las cabeceras.** Los ADR cubren la decisión macro; el comentario de cabecera cubre la implementación. `PhysicsManager.h` abre explicando por qué existe el módulo, por qué usa pimpl y por qué no expone rp3d — para el que abre el fichero sin haber leído ningún ADR.
+
+---
+
+## 12. Rendimiento y optimización
+
+| Técnica | Dónde | Nota |
+|---|---|---|
+| Sleeping automático | `WorldSettings` + por cuerpo | Nativo de rp3d |
+| Dynamic AABB Tree / broad phase | Interno de rp3d | Sin trabajo nuestro |
+| Object pooling | `HandlePool` (§6.2) + cuerpo-sonda de queries | Reutiliza índices y cuerpos |
+| Reutilización de formas | `ShapeCache` con `ShapeKey` cuantizada (§6.5) | 500 cajas iguales, una `BoxShape` |
+| Solo cuerpos activos | `captureTransforms` / `syncTransforms` | El coste escala con **despiertos** |
+| Creación en lote | `createBodies` (§6.5) | Amortiza el reequilibrado del árbol |
+| LOD de física | `PhysicsLODSystem` (§6.21) | Por isla, nunca por cuerpo suelto |
+| Islas | `IslandTracker` (§6.20) | Calculadas por nosotros (C3) |
+| Consultas espaciales sin colisión | `overlapBox` / `overlapSphere` (§6.9) | Para IA, sonido o red |
+| Subpasos acotados | `[physics.step] max_sub_steps` | Solo cuando un cuerpo con CCD lo exige |
+
+**Regla de oro:** ninguna optimización entra sin un antes/después de `PhysicsStats` (§6.18). La línea base de la Fase 0 dice si un problema es de rp3d o nuestro.
+
+---
+
+## 13. Trazabilidad con el encargo
 
 | Apartado del encargo | Fase | Estado previsto |
 |---|---|---|
-| Exclusivamente ReactPhysics3D | F0 | ✅ Sin Bullet/PhysX/Jolt/Box2D en ninguna parte |
-| `PhysicsManager` (common, world, memoria, fixed step, sync, creación/destrucción segura, colisiones, raycasts, debug, eventos) | F1–F2 | ✅ §6.1 |
-| Fixed update independiente del FPS | F1 | ✅ Ya existe (ADR-001); rp3d se acopla dentro |
+| Exclusivamente ReactPhysics3D | F0 | ✅ Sin Bullet/PhysX/Jolt/Box2D |
+| `PhysicsManager` (common, world, memoria, fixed step, sync, creación/destrucción segura, colisiones, raycasts, debug, eventos) | F1–F2 | ✅ Repartido en sistemas (§4.4) |
+| Fixed update independiente del FPS | F1 | ✅ Ya existe (ADR-001); **obligatorio**, rp3d no subdivide (C1) |
 | Static / Dynamic / Kinematic | F1 | ✅ §6.3 |
-| Las 6 formas de colisión | F1 (box, sphere) · F3 (resto) | ✅ Las 6 existen en rp3d |
+| Las 6 formas de colisión | F1 (box, sphere) · F3 (resto) | ✅ Las 6 existen |
 | Múltiples colliders por cuerpo | F3 | ✅ Con recálculo de masa/inercia |
-| Materiales: masa, densidad, fricción, restitución, centro de masa, inercia, sleeping, activación | F2 | ✅ §6.4 (masa/centro/inercia son del cuerpo, no del collider) |
-| Broad phase (Dynamic AABB Tree) | F1 | ✅ Interno de rp3d, sin trabajo |
-| Narrow phase (SAT + GJK) | F1 | ✅ Interno de rp3d, sin trabajo |
-| **Continuous Collision Detection** | F5 | ⚠️ **Emulada:** rp3d no la trae (H1, §6.13) |
-| Collision filtering por categorías y máscaras | F2 | ✅ §6.3 |
-| Triggers sin respuesta física | F2 | ✅ `setIsTrigger` |
-| 6 eventos Collision/Trigger Enter-Stay-Exit | F2 | ✅ Mapeo directo (§6.5) |
-| Evento con entidad A/B, punto, normal | F2 | ✅ Directo del callback |
-| **Evento con fuerza e impulso** | F2 | ⚠️ **Estimados:** no están en la API pública (H2, §6.5) |
-| Raycast / RaycastAll / RaycastClosest | F2 | ✅ §6.6 |
-| Raycast: máscaras, ignorar entidades, distancia/punto/normal/collider/rigidbody | F2 | ✅ Máscara nativa; "ignorar entidades" en el callback |
-| Los 4 joints con parámetros en tiempo real | F4 | ✅ §6.7 |
-| **Character Controller** (FPS/TPS, escaleras, pendientes, salto, gravedad, deslizamiento, suelo, no atravesar paredes, cápsula) | F5 | ⚠️ **Se implementa entero:** no existe en rp3d (H3, §6.8) |
-| **Vehículos** (base ampliable) | F5 | ⚠️ **Se implementa entero:** no existe en rp3d (H4, §6.9) |
-| Conversiones raylib ↔ rp3d (Vector3, Quaternion, Matrix/Transform) | F1 | ✅ §6.11, con la trampa de la matriz column vs row-major resuelta |
-| Sincronización física↔render automática | F1/F3 | ✅ Vía `TransformComponent`; nadie sincroniza a mano |
-| ECS con los 4 componentes, actualizados solo por `PhysicsManager` | F3 | ✅ §6.10 (ECS mínimo, no framework genérico) |
-| **Debug renderer: 13 elementos** | F4 | ⚠️ **6 nativos + 4 propios** (H5, §6.12) |
-| Optimización: sleeping, AABB tree, broad phase, pooling, reutilización de colliders, solo cuerpos activos, borrado seguro | F1–F6 | ✅ Repartido; handles con generación y cola diferida desde F1 |
-| Resultado: base para mundo abierto, shooters, simuladores | F6 | ✅ Con las 4 salvedades de arriba documentadas |
+| Materiales (8 propiedades) | F2 | ✅ §6.6 (masa/centro/inercia son del cuerpo) |
+| Broad phase Dynamic AABB Tree | F1 | ✅ Interno |
+| Narrow phase SAT + GJK | F1 | ✅ Interno |
+| **Continuous Collision Detection** | F5 | ⚠️ **Emulada** (H1, §6.17) |
+| Collision filtering | F2 | ✅ Capas + matriz TOML sobre máscaras (§4.5) |
+| Triggers | F2 | ✅ `setIsTrigger` + `TriggerBridge` |
+| 6 eventos Enter/Stay/Exit | F2 | ✅ Mapeo directo (§6.7) |
+| Evento con entidad, punto, normal | F2 | ✅ Directo del callback + `userData` |
+| **Evento con fuerza e impulso** | F2 | ⚠️ **Estimados** (H2, §6.7) |
+| Raycast / All / Closest + máscaras + ignorar entidades | F2 | ✅ §6.9 |
+| Los 4 joints con parámetros en tiempo real | F4 | ✅ §6.10, + fuerzas de reacción |
+| **Character Controller** | F5 | ⚠️ **Se implementa entero** (H3, §6.11) |
+| **Vehículos** | F5 | ⚠️ **Se implementa entero** (H4, §6.12) |
+| Conversiones raylib ↔ rp3d | F1 | ✅ §6.15, con la trampa row/column-major resuelta |
+| Sincronización física↔render automática | F1/F3 | ✅ Vía `TransformComponent` |
+| ECS con los 4 componentes | F3 | ✅ Con archetypes (§6.13) |
+| **Debug renderer: 13 elementos** | F4 | ⚠️ **6 nativos + 4 propios** (H5, §6.16) |
+| Optimización (sleeping, AABB tree, pooling, reutilización, solo activos, borrado seguro) | F1–F6 | ✅ §12 |
+| Resultado: base para mundo abierto, shooters, simuladores | F6 | ✅ Con las 5 salvedades documentadas |
 
-**Resumen honesto:** de los 26 apartados, **21 son integración directa** de algo que rp3d 0.10.2 ya resuelve, y **5 exigen construir lo que la librería no tiene** (CCD, impulso, character controller, vehículos, 4 elementos de debug). Ninguno es un impedimento; los cinco están planificados y ninguno se presenta como resuelto por la librería cuando no lo está.
+**Resumen honesto:** de los 26 apartados, **21 son integración directa** y **5 exigen construir lo que la librería no tiene**. Ninguno se presenta como resuelto por rp3d cuando no lo está.
 
 ---
 
-*Plan redactado tras leer el juego completo (81 ficheros, 3.416 LOC) y verificar la API de ReactPhysics3D v0.10.2 contra su código fuente. Las afirmaciones sobre la librería salen de sus headers, no de su documentación.*
+## 14. Trazabilidad con las 50 sugerencias
+
+| # | Sugerencia | Dónde |
+|---|---|---|
+| 1 | `IPhysicsDebugger` en vez de getter | §4.4, §6.16 |
+| 2 | `PhysicsSettings` completo a TOML | §6.1 (con defaults reales verificados) |
+| 3 | Capas + matriz de colisión | §4.5 (+ validación de simetría y tope de 16) |
+| 4 | Subpasos configurables por cuerpo | §6.17 — **corregido:** el barrido es por cuerpo, la subdivisión es global (C1) |
+| 5 | Separar contactos y triggers | §6.7 |
+| 6 | Profiler desde la Fase 1 | §6.18, Fase 1 |
+| 7 | ECS con archetypes | §4.6, §6.13 (con el coste de cambios estructurales dicho) |
+| 8 | `PhysicsQuerySystem` separado | §4.4, §6.9 |
+| 9 | `JointSystem` separado | §4.4, §6.10 |
+| 10 | Islas de simulación | §6.20 — **corregido:** rp3d no las expone (C3), se calculan |
+| 11 | `TransformHierarchy` | §6.13 (+ regla hijo-con-cuerpo → `FixedJoint`) |
+| 12 | Pipeline con fases y ganchos | §5.1 |
+| 13 | `ShapeKey` con hash estable | §6.5 (cuantización a milímetros) |
+| 14 | `batchCreateBodies` | §6.5, §12 |
+| 15 | `autoUpdateMass` como flag | §6.3, §6.5 |
+| 16 | `userData` opaco | §6.5 (verificado: `Body::setUserData`) |
+| 17 | `HandlePool` con tests propios | §4.3, §6.2, §10.4 |
+| 18 | `ContactFilter` dinámico | §6.8 — **corregido:** sin hook pre-narrowphase (C5), se hace por máscara |
+| 19 | Gravedad por cuerpo o zona | §6.13 (`GravityZoneComponent`) |
+| 20 | `IAssetProvider` para mallas | §6.14 |
+| 21 | `PhysicsRewindSystem` | §6.19, §10.3 |
+| 22 | Batch raycasting | §6.9, §6.11 |
+| 23 | `getContacts(BodyId)` | §6.7 — **corregido:** sin acceso a manifolds (C4), mapa propio |
+| 24 | Fuerzas internas de joints | §6.10 (verificado: sí existen) |
+| 25 | Regresión visual de vuelo | §10.1 |
+| 26 | Estrés: 500 cajas apiladas | §10.2 |
+| 27 | Determinismo por rebobinado | §10.3 |
+| 28 | Tests de `HandlePool` | §10.4 |
+| 29 | Integración por tipo de joint | §10.5 |
+| 30 | Benchmarks | §10.6, Fase 0 |
+| 31 | Bordes: masas, escalas, NaN | §10.7 |
+| 32 | Fuzzer | §10.8 |
+| 33 | Fase 2.5 de integración vertical | §8, Fase 2.5 |
+| 34 | Demo jugable por fase | §8, reglas transversales |
+| 35 | Benchmark de rp3d aislado en Fase 0 | §8, Fase 0 |
+| 36 | Checklist de limpieza | §8, Fase 1 (5 puntos) |
+| 37 | Migración de savegames con tests | §7, §8 Fase 1 |
+| 38 | Fase −1 de formación | §8, Fase −1 (condicional, con disparador) |
+| 39 | Estimaciones con rango | §8 (todas las fases) y §1.1 |
+| 40 | Contingencia por riesgo | §9 (disparador + acción) |
+| 41 | `docs/physics/` con guías | §11.1 |
+| 42 | `MIGRATION.md` de diferencias | §11.2 |
+| 43 | CHANGELOG de física | §11.3 |
+| 44 | Diagramas de vehículo y CCD | §6.12, §6.17 |
+| 45 | El "por qué" en cabeceras | §11.5 |
+| 46 | `PhysicsLODSystem` | §6.21 |
+| 47 | Delegar subpasos en rp3d | §3.3 **C1 — no es posible:** `update()` no subdivide |
+| 48 | `testAABBOverlap` | §3.3 **C2 — no existe:** overlap con cuerpo-sonda (§6.9) |
+| 49 | Lecciones de otros proyectos | §15.1 |
+| 50 | Criterio de completitud del plan | §15.2 |
+
+---
+
+## 15. Cierre: lecciones ajenas y criterio de completitud
+
+### 15.1 Lo que suele salir mal al migrar de física propia a motor
+
+Patrones recurrentes en proyectos que han hecho este mismo camino. No son anécdotas técnicas: son las que descarrilan el calendario.
+
+1. **El ajuste de parámetros se subestima siempre.** La integración funciona en semanas; que el juego *se sienta* como antes lleva más. Por eso R1 tiene contingencia propia y la Fase 1 reserva días de ajuste.
+2. **Se optimiza antes de medir.** Aparece un LOD o un pooling elaborado para un problema que no existía. Mitigación: el profiler desde la Fase 1 y la regla de "antes/después" de §12.
+3. **La física propia sobrevive meses en paralelo** con un flag "por si acaso", y el proyecto mantiene dos motores. Mitigación: la checklist de limpieza de la Fase 1, con `grep` que devuelve cero.
+4. **El determinismo se da por hecho** hasta que la CI se pone intermitente y alguien marca el test como *flaky*. Mitigación: reescribirlo en la Fase 1 (R4).
+5. **Se construye el motor genérico y se olvida el juego.** Seis meses después hay character controller, vehículos y ningún nivel nuevo. Mitigación: la Fase 2.5, la demo jugable por fase y el corte de R5.
+6. **La versión de la librería se actualiza a mitad** y cambia la semántica del solver. Mitigación: `GIT_TAG` fijo y los tests de joints de §10.5, que detectan cambios de comportamiento.
+
+### 15.2 Cuándo se considera cerrado este documento
+
+`grafico.md` es un documento vivo durante todo el proyecto y pasa a mantenimiento cuando se cumplen **las cuatro** condiciones:
+
+1. Los 26 apartados de §13 están en estado final: **verificado** o **documentado como no implementado**. Ninguno en "previsto".
+2. Las 5 salvedades (H1–H5) tienen su ADR con la limitación por escrito y su test que fija el límite.
+3. `docs/physics/` está completo (§11) y alguien ajeno al desarrollo ha añadido un cuerpo físico siguiendo solo las guías.
+4. La línea base de rendimiento de la Fase 0 tiene su contraparte final medida y comparada.
+
+Cumplidas las cuatro, este plan se marca **Cerrado** y su contenido vivo se reparte: la arquitectura a `docs/architecture.md`, las decisiones a los ADR, las guías a `docs/physics/`. Lo que quede aquí es histórico — el registro de por qué el motor es como es.
+
+---
+
+*Plan v2.0, redactado tras leer el juego completo (81 ficheros, 3.416 LOC) y verificar la API de ReactPhysics3D v0.10.2 contra su código fuente. Las afirmaciones sobre la librería salen de sus headers y sus fuentes, no de su documentación. Cuando una sugerencia de revisión contradecía al código, ha ganado el código (§3.3).*
