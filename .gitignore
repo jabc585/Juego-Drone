@@ -17,7 +17,7 @@ DroneFlightSim
 *.swp
 *.swo
 *~
-
+docs
 # macOS
 .DS_Store
 ._*
@@ -27,3 +27,51 @@ vcpkg_installed/
 PLAN3.md# Runtime
 drone_game.log
 *.log
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Linker files
+*.ilk
+
+# Debugger Files
+*.pdb
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# debug information files
+*.dwo
+
+# Others
+.pio
+.vscode
+
+# Local config (copy from platformio.ini.example and adjust)
+platformio.ini

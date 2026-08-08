@@ -40,6 +40,20 @@ const char* windArrow(const Vec3& wind) {
     return wind.z >= 0 ? "↑" : "↓";
 }
 
+// snprintf rellena por bytes: "CONFIGURACIÓN" ocupa 14 bytes pero 13 columnas,
+// asi que con %-14s la cabecera se desalineaba. Aqui se cuentan caracteres.
+std::string padded(const char* text, std::size_t columns) {
+    std::string s = text;
+    std::size_t width = 0;
+    for (const char c : s) {
+        if ((static_cast<unsigned char>(c) & 0xC0) != 0x80)
+            ++width;
+    }
+    if (width < columns)
+        s.append(columns - width, ' ');
+    return s;
+}
+
 const char* stateLabel(GameState s) {
     switch (s) {
         case GameState::Booting:
@@ -92,12 +106,13 @@ std::string TerminalRenderer::buildFrame(const WorldState& s) const {
     char line[kLineBufferSize];
 
     out << "\x1b[H";  // cursor a origen; cada línea termina con \x1b[K
-    std::snprintf(line, sizeof(line), " DRONE FLIGHT SIMULATOR      %-14s FPS: %3.0f",
-                  stateLabel(s.state), static_cast<double>(m_fps));
+    std::snprintf(line, sizeof(line), " DRONE FLIGHT SIMULATOR      %s FPS:%3.0f  phys:%.1fms",
+                  padded(stateLabel(s.state), 14).c_str(), static_cast<double>(m_fps),
+                  static_cast<double>(s.physicsMs));
     out << line << "\x1b[K\n";
     out << "-----------------------------------------------------\x1b[K\n";
     std::snprintf(line, sizeof(line), " Altitud:  %6.1f m    Velocidad: %5.1f m/s",
-                  static_cast<double>(s.dronePosition.y),
+                  static_cast<double>(s.groundDistance),
                   static_cast<double>(s.droneVelocity.length()));
     out << line << "\x1b[K\n";
     std::snprintf(line, sizeof(line), " Batería:  %s %5.1f %%", batteryBar(s.battery).c_str(),
@@ -115,6 +130,11 @@ std::string TerminalRenderer::buildFrame(const WorldState& s) const {
     std::snprintf(line, sizeof(line), " Nivel %d   XP: %d/%d   Entorno: %s", s.level, s.experience,
                   s.experienceToNext, s.environmentName.c_str());
     out << line << "\x1b[K\n";
+    // Estado de sistemas de vuelo
+    const char* mode = s.altitudeHoldActive ? "ALT-HOLD" : s.failsafeActive ? "FAILSAFE" : "MANUAL";
+    std::snprintf(line, sizeof(line), " Modo: %s  Obj alt: %.1f m", mode,
+                  static_cast<double>(s.targetAltitude));
+    out << line << "\x1b[K\n";
 
     switch (s.state) {
         case GameState::Paused:
@@ -123,7 +143,8 @@ std::string TerminalRenderer::buildFrame(const WorldState& s) const {
             break;
         case GameState::Settings:
             out << "\x1b[K\n === Configuración ===\x1b[K\n"
-                   " Controles: WASD/flechas + Q/E. Cualquier tecla para volver."
+                   " WASD/flechas mover · ESPACIO subir 1 m (x2 subir sin parar)\x1b[K\n"
+                   " H altitud · F1-F4 trim · Cualquier tecla para volver."
                    "\x1b[K\n";
             break;
         case GameState::GameOver:
@@ -131,8 +152,10 @@ std::string TerminalRenderer::buildFrame(const WorldState& s) const {
                    " [R/1] Reiniciar   [X/3] Salir\x1b[K\n";
             break;
         default:
-            out << " Controles: WASD mover · Q/E subir/bajar · P pausa · F5/F9 "
-                   "guardar/cargar · X/Esc salir\x1b[K\n\x1b[K\n\x1b[K\n";
+            out << " WASD/flechas mover · ESPACIO subir 1 m (x2 subir sin parar) · "
+                   "baja solo\x1b[K\n"
+                   " H mantener altitud · F1-F4 trim\x1b[K\n"
+                   " P pausa · F5/F9 guardar/cargar · X/Esc salir\x1b[K\n\x1b[K\n";
             break;
     }
 
@@ -189,6 +212,10 @@ void TerminalRenderer::onEvent(const Event& event) {
             break;
         case EventType::GameLoaded:
             std::snprintf(buffer, sizeof(buffer), "Partida cargada");
+            break;
+        case EventType::LandingZone:
+            std::snprintf(buffer, sizeof(buffer), "Aterrizaje limpio: +%.0f XP",
+                          static_cast<double>(event.value));
             break;
     }
     m_message = buffer;

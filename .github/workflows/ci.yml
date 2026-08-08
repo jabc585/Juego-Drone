@@ -21,8 +21,20 @@ jobs:
       - name: Check formatting
         run: clang-format --dry-run -Werror $(git ls-files '*.h' '*.cpp')
 
+      # Se buscan los símbolos completos, no subcadenas: el patrón anterior
+      # marcaba cualquier identificador que contuviera "cin" —"bounciness",
+      # sin ir más lejos— y tumbaba el job por un falso positivo.
       - name: Check no iostream in core
-        run: "! grep -rn 'cout\\|cin\\|printf' src/core/"
+        run: "! grep -rnE 'std::(cout|cerr|cin)|\\b(printf|fprintf|puts)\\s*\\(' src/core/"
+
+      # ADR-009: rp3d no sale del pimpl de drone_physics. Si estas cabeceras
+      # se filtran, el core deja de compilar sin el motor y la fachada se
+      # vuelve decorativa.
+      - name: Check rp3d stays inside drone_physics (ADR-009)
+        run: "! grep -rn 'reactphysics3d' src/core src/frontend src/app"
+
+      - name: Check rp3d is absent from the drone_physics public API (ADR-009)
+        run: "! grep -rn 'reactphysics3d' src/physics/*.h"
 
   build-and-test:
     needs: lint

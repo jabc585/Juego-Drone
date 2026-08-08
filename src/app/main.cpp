@@ -16,6 +16,7 @@
 #ifdef DRONE_HAS_RAYLIB
 #include "frontend/raylib/RaylibInput.h"
 #include "frontend/raylib/RaylibRenderer.h"
+#include "frontend/raylib/RaylibViewState.h"
 #endif
 
 #ifndef DRONE_VERSION
@@ -32,14 +33,25 @@ void printHelp() {
               " [--gui]"
 #endif
               "\n  --gui    usar frontend grafico (raylib) en vez de terminal\n\n"
-              "Controles:\n"
+              "Controles de vuelo:\n"
               "  W/A/S/D o flechas  mover\n"
-              "  Q / E              ascender / descender\n"
+              "  Espacio            subir un metro; dos veces seguidas, subir\n"
+              "                     sin parar; otra pulsacion lo corta. Para\n"
+              "                     bajar basta con soltar: manda la gravedad\n"
+              "  H                  mantener altitud\n"
+              "  F1 / F2            trim de cabeceo\n"
+              "  F3 / F4            trim de alabeo\n"
               "  P                  pausa\n"
               "  F5                 guardar partida\n"
               "  F9                 cargar partida\n"
               "  X o Esc            salir\n"
-              "  R                  reiniciar (tras fin de partida)");
+              "  R                  reiniciar (tras fin de partida)\n\n"
+              "Camara (modo --gui):\n"
+              "  F12                alternar Follow / Free / Orbit\n"
+              "  F11                pantalla completa\n"
+              "  ClickDer + arrastre orbitar (modo Orbit)\n"
+              "  Rueda raton        zoom (modo Orbit)\n"
+              "  WASD               mover (modo Free)");
 }
 
 }  // namespace
@@ -67,6 +79,7 @@ int main(int argc, char** argv) {
 
     drone::GameConfig config = drone::loadConfig("assets/config/game.toml");
     drone::validateConfig(config);
+    auto physCfg = drone::loadPhysicsConfig("assets/config/game.toml");
 
     drone::GameLogger logger;
     logger.info("Juego iniciado (v" DRONE_VERSION ")");
@@ -77,9 +90,13 @@ int main(int argc, char** argv) {
     std::unique_ptr<drone::IInputSource> input;
     std::unique_ptr<drone::IRenderer> renderer;
 #ifdef DRONE_HAS_RAYLIB
+    // Compartido entre entrada y renderizador, y declarado antes que ellos
+    // para que les sobreviva: la camara libre se queda con W/A/S/D y la
+    // entrada tiene que saberlo para no pilotar el dron a la vez.
+    drone::RaylibViewState viewState;
     if (useGui) {
-        input = std::make_unique<drone::RaylibInput>();
-        renderer = std::make_unique<drone::RaylibRenderer>();
+        input = std::make_unique<drone::RaylibInput>(viewState);
+        renderer = std::make_unique<drone::RaylibRenderer>(viewState);
     }
 #endif
     if (!input) {
@@ -87,7 +104,7 @@ int main(int argc, char** argv) {
         renderer = std::make_unique<drone::TerminalRenderer>();
     }
 
-    drone::GameController game(*input, *renderer, config);
+    drone::GameController game(*input, *renderer, config, physCfg);
     logger.attach(game.getEventBus());
 
     if (auto old = drone::loadGame(drone::saveFilePath()); old.version > 0) {
@@ -97,6 +114,13 @@ int main(int argc, char** argv) {
 
     using clock = std::chrono::steady_clock;
     auto last = clock::now();
+
+    // Sin tope el bucle giraba a ~650 FPS: 11 redibujados por paso de fisica y
+    // 344 KB/s de secuencias ANSI a la terminal, para un HUD que solo puede
+    // cambiar a 60 Hz. Se limita al ritmo del paso fijo.
+    const auto frameBudget = std::chrono::duration_cast<clock::duration>(
+        std::chrono::duration<float>(config.fixedTimestep));
+    auto nextFrame = clock::now();
 
     while (game.state() != drone::GameState::ShuttingDown) {
         const auto now = clock::now();
@@ -126,7 +150,15 @@ int main(int argc, char** argv) {
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        nextFrame += frameBudget;
+        const auto after = clock::now();
+        if (after < nextFrame) {
+            std::this_thread::sleep_for(nextFrame - after);
+        } else {
+            // Se ha ido el presupuesto (pausa del SO, terminal lenta): se
+            // reancla en vez de acumular deuda y correr para recuperarla.
+            nextFrame = after;
+        }
     }
 
     return 0;

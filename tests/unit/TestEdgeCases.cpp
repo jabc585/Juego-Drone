@@ -4,14 +4,12 @@
 #include "core/Environment.h"
 #include "core/EventBus.h"
 #include "core/GameConfig.h"
-#include "core/PhysicsEngine.h"
 #include "core/PlayerProgression.h"
 
 using drone::Drone;
 using drone::Environment;
 using drone::EventBus;
 using drone::GameConfig;
-using drone::PhysicsEngine;
 
 TEST_CASE("Drone with extreme thrust input is clamped safely", "[EdgeCase]") {
     GameConfig cfg;
@@ -20,41 +18,6 @@ TEST_CASE("Drone with extreme thrust input is clamped safely", "[EdgeCase]") {
     REQUIRE(d.thrustInput().x == 1.0f);
     REQUIRE(d.thrustInput().y == -1.0f);
     REQUIRE(d.thrustInput().z == 0.5f);
-}
-
-TEST_CASE("Physics survives massive time step without NaN", "[EdgeCase]") {
-    GameConfig cfg;
-    cfg.maxFrameTime = 10.0f;
-    EventBus bus;
-    Environment env(cfg);
-    PhysicsEngine phys(cfg, bus);
-    Drone drone(cfg);
-
-    drone.setPosition({0, 10.0f, 0});
-    drone.setVelocity({1.0f, 0.0f, 0.0f});
-    phys.step(drone, env, 10.0f);
-
-    REQUIRE(std::isfinite(drone.position().x));
-    REQUIRE(std::isfinite(drone.position().y));
-    REQUIRE(std::isfinite(drone.position().z));
-    REQUIRE(drone.position().y >= 0.0f);  // ground clamp survived
-}
-
-TEST_CASE("Physics with zero-mass config does not divide by zero", "[EdgeCase]") {
-    // Test de robustez: masa cero seria absurda pero validateConfig() la rechazaria.
-    // Si de alguna forma llegara, la division por cero en accel produciria NaN.
-    GameConfig cfg;
-    cfg.droneMass = 0.01f;  // minima valida segun validateConfig()
-    EventBus bus;
-    Environment env(cfg);
-    PhysicsEngine phys(cfg, bus);
-    Drone drone(cfg);
-
-    drone.setPosition({0, 5.0f, 0});
-    phys.step(drone, env, cfg.fixedTimestep);
-
-    REQUIRE(std::isfinite(drone.position().x));
-    REQUIRE(std::isfinite(drone.velocity().y));
 }
 
 TEST_CASE("Drone battery drain with zero thrust does nothing", "[EdgeCase]") {
@@ -83,8 +46,6 @@ TEST_CASE("Environment handles zero timestep gracefully", "[EdgeCase]") {
 }
 
 TEST_CASE("PlayerProgression with huge XP values does not overflow int", "[EdgeCase]") {
-    // Progression usa int para XP; 2^31 - 1 es el maximo teorico.
-    // Threshold es 100, asi que 2e9 XP deberia manejarse.
     GameConfig cfg;
     EventBus bus;
     drone::PlayerProgression p(cfg, bus);

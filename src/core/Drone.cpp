@@ -18,18 +18,13 @@ void Drone::drainBattery(float amount) {
     m_battery = std::max(0.0f, std::min(m_config.batteryMax, m_battery - amount));
 }
 
-void Drone::clampToGround() {
-    if (m_position.y < 0.0f)
-        m_position.y = 0.0f;
-    if (m_velocity.y < 0.0f)
-        m_velocity.y = 0.0f;
-}
-
 void Drone::reset() {
     m_position = {};
     m_velocity = {};
     m_thrustInput = {};
     m_battery = m_config.batteryMax;
+    m_grounded = true;
+    m_roll = m_pitch = m_yaw = 0.0f;
 }
 
 }  // namespace drone

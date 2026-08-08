@@ -8,6 +8,7 @@ endif()
 add_library(drone_frontend_raylib STATIC
     RaylibInput.cpp
     RaylibRenderer.cpp
+    ParticleSystem.cpp
 )
 
 target_link_libraries(drone_frontend_raylib

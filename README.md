@@ -27,7 +27,10 @@ cmake --build build --parallel
 | Tecla | Acción |
 |---|---|
 | `W`/`A`/`S`/`D` o flechas | mover |
-| `Q` / `E` | ascender / descender |
+| `Espacio` | subir un metro; dos pulsaciones seguidas, subir sin parar; otra lo corta |
+| — | para bajar no hay tecla: se suelta y baja por gravedad |
+| `H` | mantener altitud |
+| `F1`/`F2`, `F3`/`F4` | trim de cabeceo, de alabeo |
 | `P` | pausa |
 | `F5` / `F9` | guardar / cargar partida |
 | `R` | reiniciar (tras fin de partida) |

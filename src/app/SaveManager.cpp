@@ -57,6 +57,10 @@ SaveData buildSaveData(const WorldState& state) {
     d.experience = state.experience;
     d.difficulty = state.difficulty;
     d.simTime = state.simTime;
+    d.droneQx = state.droneQx;
+    d.droneQy = state.droneQy;
+    d.droneQz = state.droneQz;
+    d.droneQw = state.droneQw;
     d.state = state.state;
     return d;
 }
@@ -73,6 +77,10 @@ bool saveGame(const std::string& path, const SaveData& data) {
         {"experience", data.experience},
         {"difficulty", data.difficulty},
         {"sim_time", data.simTime},
+        {"drone_orientation", toml::table{{"qx", data.droneQx},
+                                          {"qy", data.droneQy},
+                                          {"qz", data.droneQz},
+                                          {"qw", data.droneQw}}},
         {"game_state", static_cast<int>(data.state)},
     };
 
@@ -122,13 +130,20 @@ SaveData loadGame(const std::string& path) {
         d.experience = tbl["experience"].value_or(0);
         d.difficulty = tbl["difficulty"].value_or(1.0f);
         d.simTime = tbl["sim_time"].value_or(0.0f);
+        if (auto orientTbl = tbl["drone_orientation"].as_table()) {
+            d.droneQx = orientTbl->get("qx")->value_or(0.0f);
+            d.droneQy = orientTbl->get("qy")->value_or(0.0f);
+            d.droneQz = orientTbl->get("qz")->value_or(0.0f);
+            d.droneQw = orientTbl->get("qw")->value_or(1.0f);
+        }
         int gs = tbl["game_state"].value_or(0);
         d.state = (gs >= 0 && gs <= 5) ? static_cast<GameState>(gs) : GameState::Playing;
 
         // Un save editado o corrupto con NaN/inf contaminaría toda la
         // simulación: se rechaza entero.
-        const float floats[] = {d.dronePosX, d.dronePosY, d.dronePosZ,  d.droneVelX, d.droneVelY,
-                                d.droneVelZ, d.battery,   d.difficulty, d.simTime};
+        const float floats[] = {d.dronePosX, d.dronePosY,  d.dronePosZ, d.droneVelX, d.droneVelY,
+                                d.droneVelZ, d.droneQx,    d.droneQy,   d.droneQz,   d.droneQw,
+                                d.battery,   d.difficulty, d.simTime};
         for (float f : floats) {
             if (!std::isfinite(f)) {
                 d.version = -1;

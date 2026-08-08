@@ -28,15 +28,14 @@ Command mapKey(int key) {
         case 'D':
         case 'd':
             return Command::StrafeRight;
-        case 'Q':
-        case 'q':
+        case ' ':
             return Command::Ascend;
-        case 'E':
-        case 'e':
-            return Command::Descend;
         case 'P':
         case 'p':
             return Command::Pause;
+        case 'H':
+        case 'h':
+            return Command::AltitudeToggle;
         case 'R':
         case 'r':
             return Command::Restart;
@@ -50,7 +49,28 @@ Command mapKey(int key) {
         case '3':
             return Command::Option3;
         default:
-            return Command::None;
+            return Command::Unknown;
+    }
+}
+
+// F1-F4 ajustan trims, F5/F9 guardan y cargan. Los numeros son los codigos
+// CSI de xterm (F1=11 ... F5=15, F9=20).
+Command mapFunctionKey(int code) {
+    switch (code) {
+        case 11:
+            return Command::TrimPitchUp;
+        case 12:
+            return Command::TrimPitchDown;
+        case 13:
+            return Command::TrimRollLeft;
+        case 14:
+            return Command::TrimRollRight;
+        case 15:
+            return Command::Save;
+        case 20:
+            return Command::Load;
+        default:
+            return Command::Unknown;
     }
 }
 
@@ -120,62 +140,112 @@ TerminalInput::~TerminalInput() {
     s_instance = nullptr;
 }
 
-int TerminalInput::readByte() {
+int TerminalInput::readByte(int timeoutMs) {
     pollfd fd{STDIN_FILENO, POLLIN, 0};
-    const int ready = ::poll(&fd, 1, 0);
+    const int ready = ::poll(&fd, 1, timeoutMs);
     if (ready <= 0)
-        return -1;
+        return kNoByte;
     unsigned char byte = 0;
     const ssize_t n = ::read(STDIN_FILENO, &byte, 1);
     if (n == 0)
-        return -2;  // EOF: la fuente se agotó (cierra B3)
+        return kEof;  // EOF: la fuente se agotó (cierra B3)
     if (n < 0)
-        return -1;
+        return kNoByte;
     return byte;
+}
+
+// Los bytes que siguen a Esc pueden llegar en lecturas distintas (ssh, tmux,
+// terminales lentas). Sin margen de espera una flecha se leia como Esc suelto
+// y cerraba la partida, asi que aqui si esperamos.
+int TerminalInput::readSequenceByte() {
+    const int byte = readByte(kEscapeTimeoutMs);
+    if (byte == kEof)
+        m_eof = true;
+    return byte;
+}
+
+Command TerminalInput::parseEscape() {
+    const int second = readSequenceByte();
+    if (second == kEof)
+        return Command::Quit;
+    if (second == kNoByte)
+        return Command::Quit;  // Esc suelto: nadie continua la secuencia
+
+    // SS3: como manda Terminal.app, iTerm2 y xterm las F1-F4, y las flechas
+    // cuando el terminal esta en modo aplicacion.
+    if (second == 'O') {
+        switch (readSequenceByte()) {
+            case 'P':
+                return Command::TrimPitchUp;  // F1
+            case 'Q':
+                return Command::TrimPitchDown;  // F2
+            case 'R':
+                return Command::TrimRollLeft;  // F3
+            case 'S':
+                return Command::TrimRollRight;  // F4
+            case 'A':
+                return Command::ThrustForward;
+            case 'B':
+                return Command::ThrustBackward;
+            case 'C':
+                return Command::StrafeRight;
+            case 'D':
+                return Command::StrafeLeft;
+            case kEof:
+                return Command::Quit;
+            default:
+                return Command::Unknown;
+        }
+    }
+    if (second != '[')
+        return Command::Unknown;  // secuencia que no entendemos: se ignora
+
+    const int third = readSequenceByte();
+    switch (third) {
+        case 'A':
+            return Command::ThrustForward;  // ↑
+        case 'B':
+            return Command::ThrustBackward;  // ↓
+        case 'C':
+            return Command::StrafeRight;  // →
+        case 'D':
+            return Command::StrafeLeft;  // ←
+        case kEof:
+            return Command::Quit;
+        default:
+            break;
+    }
+    if (third < '0' || third > '9')
+        return Command::Unknown;
+
+    // CSI numerico: ESC [ <codigo> ~, con posible modificador ESC [ <codigo> ; <mod> ~
+    int code = third - '0';
+    for (int i = 0; i < 4; ++i) {
+        const int next = readSequenceByte();
+        if (next == '~')
+            return mapFunctionKey(code);
+        if (next == kEof)
+            return Command::Quit;
+        if (next < '0' || next > '9')
+            return Command::Unknown;
+        code = code * 10 + (next - '0');
+    }
+    return Command::Unknown;
 }
 
 Command TerminalInput::poll() {
     if (m_eof)
         return Command::Quit;
 
-    const int byte = readByte();
-    if (byte == -1)
+    const int byte = readByte(0);
+    if (byte == kNoByte)
         return Command::None;
-    if (byte == -2) {
+    if (byte == kEof) {
         m_eof = true;
         return Command::Quit;
     }
-
-    if (byte == 27) {  // Esc: ¿tecla suelta o secuencia?
-        const int second = readByte();
-        if (second != '[')
-            return Command::Quit;
-        const int third = readByte();
-        switch (third) {
-            case 'A':
-                return Command::Ascend;  // ↑
-            case 'B':
-                return Command::Descend;  // ↓
-            case 'C':
-                return Command::StrafeRight;  // →
-            case 'D':
-                return Command::StrafeLeft;  // ←
-            case '1': {                      // F5: ESC [ 1 5 ~
-                const int fourth = readByte();
-                if (fourth == '5' && readByte() == '~')
-                    return Command::Save;
-                return Command::None;
-            }
-            case '2': {  // F9: ESC [ 2 0 ~
-                const int fourth = readByte();
-                if (fourth == '0' && readByte() == '~')
-                    return Command::Load;
-                return Command::None;
-            }
-            default:
-                return Command::None;
-        }
-    }
+    if (byte == 27)
+        return parseEscape();
 
     return mapKey(byte);
 }

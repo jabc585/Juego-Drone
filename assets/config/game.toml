@@ -3,7 +3,7 @@
 # Rangos: los valores fuera de rango se ignoran y generan un aviso en consola.
 
 [physics]
-gravity          = 9.81
+# La gravedad se configura en [physics.world] (la aplica rp3d).
 drone_mass       = 1.2
 max_thrust       = 25.0
 drag_coefficient = 0.35
@@ -36,3 +36,70 @@ gust_min_interval = 2.0
 gust_max_interval = 6.0
 difficulty_ramp   = 0.02
 max_difficulty    = 10.0
+
+# --- rp3d Physics Engine (grafico.md §6.1) ---
+
+[physics.world]
+gravity                       = [0.0, -9.81, 0.0]
+persistent_contact_distance   = 0.03
+default_friction_coefficient  = 0.3
+default_bounciness            = 0.5
+restitution_velocity_threshold = 0.5
+velocity_solver_iterations    = 6
+position_solver_iterations    = 3
+cos_angle_similar_contact_manifold = 0.95
+
+[physics.sleeping]
+enabled                = true
+time_before_sleep      = 1.0
+sleep_linear_velocity  = 0.02
+sleep_angular_velocity = 0.0523
+
+[physics.step]
+fixed_timestep  = 0.0166667
+max_frame_time  = 0.25
+max_sub_steps   = 4
+
+[physics.debug]
+enabled = false
+
+[materials]
+drone_friction    = 0.3
+drone_bounciness  = 0.0
+obstacle_friction = 0.6
+obstacle_bounciness = 0.1
+ground_friction   = 0.8
+ground_bounciness = 0.0
+
+[drone]
+linear_damping  = 0.3
+angular_damping = 0.5
+
+# --- Control de vuelo (portado de cortex-main) ---
+
+[drone.frame]
+arm_length          = 0.25    # m del centro de masa a cada motor
+yaw_torque_factor   = 0.02    # N·m de reaccion por N de empuje; 0 = sin yaw
+motor_time_constant = 0.05    # s de respuesta del conjunto motor+ESC
+inertia             = 0.006   # kg·m^2, momento de un quad de 250 mm
+max_tilt_deg        = 20.0    # inclinacion maxima que pide el mando
+
+# Ganancias EN LAS UNIDADES DEL ORIGINAL (grados y cuentas PWM sobre 1997).
+# La conversion a radianes y fraccion de empuje la hace World.
+[drone.pid]
+roll_kp  = 6.0
+roll_ki  = 1.5
+roll_kd  = 2.0
+pitch_kp = 9.0
+pitch_ki = 1.0
+pitch_kd = 5.0
+yaw_kp   = 0.15
+yaw_ki   = 0.03
+yaw_ff   = 1.0
+
+[drone.assist]
+altitude_hold_kp        = 1.5
+yaw_hold_kp             = 2.0
+failsafe_timeout        = 2.0    # s sin empuje antes de aterrizar solo
+failsafe_descent_per_s  = 0.25   # fraccion de empuje que se pierde por segundo
+trim_step_deg           = 0.2

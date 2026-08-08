@@ -1,6 +1,6 @@
 # ADR-004: Fisica propia vs Bullet Physics
 
-**Estado:** Aceptado
+**Estado:** Reemplazado por [ADR-008](008-rp3d-sustituye-fisica-propia.md)
 **Fecha:** 2026-08-04
 
 ## Contexto

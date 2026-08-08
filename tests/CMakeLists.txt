@@ -9,16 +9,29 @@ FetchContent_MakeAvailable(Catch2)
 add_executable(test_core
     unit/TestVec3.cpp
     unit/TestDrone.cpp
+    unit/TestHandlePool.cpp
+    unit/TestFlightControl.cpp
     unit/TestEventBus.cpp
     unit/TestPhysics.cpp
     unit/TestProgression.cpp
     unit/TestGameController.cpp
+    unit/TestTerminalInput.cpp
     unit/TestEnvironment.cpp
     unit/TestEdgeCases.cpp
     integration/TestWorldStep.cpp
 )
 
-target_link_libraries(test_core PRIVATE drone_core Catch2::Catch2WithMain)
+# drone_frontend_terminal arrastra drone_core como PUBLIC; nombrarlo aqui otra
+# vez hace que el enlazador avise de biblioteca duplicada.
+target_link_libraries(test_core PRIVATE drone_frontend_terminal Catch2::Catch2WithMain)
+
+# El frontend grafico es opcional: sin raylib el target no existe y estos
+# tests no se compilan. ParticleSystem es logica pura, asi que se puede
+# ejercitar sin abrir ninguna ventana.
+if(TARGET drone_frontend_raylib)
+    target_sources(test_core PRIVATE unit/TestParticleSystem.cpp)
+    target_link_libraries(test_core PRIVATE drone_frontend_raylib)
+endif()
 
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(Catch)

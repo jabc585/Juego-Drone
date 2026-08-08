@@ -20,7 +20,15 @@ public:
 
 private:
 #if !defined(_WIN32)
-    int readByte();
+    static constexpr int kNoByte = -1;
+    static constexpr int kEof = -2;
+    // Margen para que lleguen los bytes que siguen a Esc. Solo se paga al
+    // pulsar Esc o una tecla de secuencia, nunca en el camino normal.
+    static constexpr int kEscapeTimeoutMs = 100;
+
+    int readByte(int timeoutMs);
+    int readSequenceByte();
+    Command parseEscape();
 
     termios m_savedTermios{};
     bool m_rawMode = false;

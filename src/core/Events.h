@@ -10,6 +10,7 @@ enum class EventType {
     DroneUnlocked,  // value = nivel de desbloqueo
     GameSaved,      // value sin uso
     GameLoaded,     // value sin uso
+    LandingZone,    // value = XP otorgado
 };
 
 struct Event {

@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "frontend/IInputSource.h"
+#include "frontend/raylib/RaylibViewState.h"
 
 namespace drone {
 
@@ -17,11 +18,14 @@ namespace drone {
 // anterior (donde raylib actualiza el estado del teclado).
 class RaylibInput : public IInputSource {
 public:
+    explicit RaylibInput(const RaylibViewState& view) : m_view(view) {}
+
     Command poll() override;
 
 private:
     void collectFrameCommands();
 
+    const RaylibViewState& m_view;
     std::vector<Command> m_queue;
     std::size_t m_next = 0;
     bool m_needsRefill = true;

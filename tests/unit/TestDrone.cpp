@@ -36,15 +36,16 @@ TEST_CASE("Drone battery never goes below 0 nor above max", "[Drone]") {
     REQUIRE(d.battery() == cfg.batteryMax);
 }
 
-TEST_CASE("Drone clampToGround stops downward motion", "[Drone]") {
+// Sustituye al test de clampToGround: el suelo lo resuelve ahora rp3d, y
+// "posado" es un hecho que reporta el contacto, no una altura.
+TEST_CASE("Drone grounded flag is set from outside, not derived from altitude", "[Drone]") {
     GameConfig cfg;
     Drone d(cfg);
-    d.setPosition({0, -2.0f, 0});
-    d.setVelocity({1.0f, -5.0f, 0});
-    d.clampToGround();
-    REQUIRE(d.position().y == 0.0f);
-    REQUIRE(d.velocity().y == 0.0f);
-    REQUIRE(d.velocity().x == 1.0f);
+    d.setPosition({0, 25.0f, 0});
+    d.setGrounded(false);
+    REQUIRE_FALSE(d.isGrounded());
+    d.setGrounded(true);
+    REQUIRE(d.isGrounded());
 }
 
 TEST_CASE("Drone reset restores initial state", "[Drone]") {
@@ -53,10 +54,12 @@ TEST_CASE("Drone reset restores initial state", "[Drone]") {
     d.setPosition({1, 2, 3});
     d.setVelocity({4, 5, 6});
     d.setThrustInput({1, 1, 1});
+    d.setGrounded(false);
     d.drainBattery(50.0f);
     d.reset();
     REQUIRE(d.position().length() == 0.0f);
     REQUIRE(d.velocity().length() == 0.0f);
     REQUIRE(d.thrustInput().length() == 0.0f);
     REQUIRE(d.battery() == cfg.batteryMax);
+    REQUIRE(d.isGrounded());
 }

@@ -60,6 +60,9 @@ void GameLogger::onEvent(const Event& e) {
         case EventType::GameLoaded:
             m_impl->logger->info("Partida cargada");
             break;
+        case EventType::LandingZone:
+            m_impl->logger->info("Aterrizaje en zona: +{:.0f} XP", e.value);
+            break;
     }
 }
 
